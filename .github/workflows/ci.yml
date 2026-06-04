@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  verify-bashutils:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: install bats-core
+        run: |
+          ./helper.sh reqs
+      - name: bash syntax check
+        run: |
+          bash -n bashutils-template.sh && bash -n .bashutils
+      - name: run bats tests
+        run: ./helper.sh test
+      - name: Verify .bashutils is up to date
+        run: |
+          ./helper.sh build_bashutils
+          git diff --exit-code -- .bashutils
