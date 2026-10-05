@@ -47,9 +47,9 @@ source_if_exists() {
 export FILE_VARIABLES=${FILE_VARIABLES:-".variables"}
 export FILE_LOCAL_VARIABLES=${FILE_LOCAL_VARIABLES:-".local_variables"}
 export FILE_SECRETS=${FILE_SECRETS:-".secrets"}
-export INCLUDE_FILE=${INCLUDE_FILE:-".bashutils"}
-export BASHUTILS_URL=${BASHUTILS_URL:-"https://api.github.com/repos/tgedr/bashutils/contents/.bashutils"}
-export BASHUTILS_CHECKSUM_URL=${BASHUTILS_CHECKSUM_URL:-"https://api.github.com/repos/tgedr/bashutils/contents/.bashutils.checksum"}
+export INCLUDE_FILE=${INCLUDE_FILE:-"bashutils"}
+export BASHUTILS_URL=${BASHUTILS_URL:-"https://api.github.com/repos/tgedr/bashutils/contents/bashutils"}
+export BASHUTILS_CHECKSUM_URL=${BASHUTILS_CHECKSUM_URL:-"https://api.github.com/repos/tgedr/bashutils/contents/bashutils.checksum"}
 export BASHUTILS_CHECK_INTERVAL_SECONDS=${BASHUTILS_CHECK_INTERVAL_SECONDS:-"86400"}
 
 get_file_mtime_epoch() {
@@ -276,10 +276,7 @@ create_release_artifacts(){
   value=$((10#$value + 1))
   info "[create_release_artifacts] incremented version to $value"
   printf '%s\n' "$value" > "$version_file"
-  version="$value"
 
-  cp "$version_file" "$dist_dir/" || { err "[create_release_artifacts] failed to move $version_file to $dist_dir"; exit 1; }
-  ls -altr "$dist_dir"
   info "[create_release_artifacts|out] => 0"
 }
 
@@ -326,7 +323,7 @@ usage() {
     options:
       - reqs                        installs required tools and dependencies
       - test                        runs tests
-      - build                       rebuild .bashutils by concatenating all files in sections/
+      - build                       rebuild bashutils by concatenating all files in sections/
       - create_release_artifacts    create release artifacts in the dist directory
 EOM
   exit 1

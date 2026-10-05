@@ -110,4 +110,5 @@ coverage
 .secrets
 bashutils.tar.bz2
 .local_variables
-.bashutils.last_check
+bashutils.last_check
+bashutils.last_check

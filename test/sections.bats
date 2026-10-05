@@ -240,12 +240,12 @@ load_section() {
   mkdir -p "$release_dist"
   cp "$ROOT_DIR/helper.sh" "$release_root/helper.sh"
   printf '14\n' > "$release_root/.version"
-  touch "$release_dist/.bashutils" "$release_dist/.bashutils.checksum" "$release_dist/.version"
+  touch "$release_dist/bashutils" "$release_dist/bashutils.checksum" "$release_dist/.version"
 
   run env RELEASE_DRAFT=true bash "$release_root/helper.sh" create_github_release
   [ "$status" -eq 0 ]
-  grep -F "$release_dist/.bashutils" "$COMMAND_LOG"
-  grep -F "$release_dist/.bashutils.checksum" "$COMMAND_LOG"
+  grep -F "$release_dist/bashutils" "$COMMAND_LOG"
+  grep -F "$release_dist/bashutils.checksum" "$COMMAND_LOG"
   grep -F "$release_dist/.version" "$COMMAND_LOG"
 
   : > "$COMMAND_LOG"
@@ -254,12 +254,12 @@ load_section() {
   create_github_release 14 >/dev/null
   [ "$?" -eq 0 ]
   cd "$ORIGINAL_PWD"
-  grep -F 'dist/.bashutils' "$COMMAND_LOG"
-  grep -F 'dist/.bashutils.checksum' "$COMMAND_LOG"
+  grep -F 'dist/bashutils' "$COMMAND_LOG"
+  grep -F 'dist/bashutils.checksum' "$COMMAND_LOG"
   grep -F 'dist/.version' "$COMMAND_LOG"
 
   : > "$COMMAND_LOG"
-  rm -f "$release_dist/.bashutils" "$release_dist/.bashutils.checksum" "$release_dist/.version"
+  rm -f "$release_dist/bashutils" "$release_dist/bashutils.checksum" "$release_dist/.version"
   run env RELEASE_DRAFT=true bash "$release_root/helper.sh" create_github_release
   [ "$status" -eq 1 ]
   [[ "$output" == *"no release assets found"* ]]

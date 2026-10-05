@@ -16,13 +16,13 @@ jobs:
           ./helper.sh reqs
       - name: bash syntax check
         run: |
-          bash -n bashutils-template.sh && bash -n .bashutils
+          bash -n bashutils-template.sh && bash -n bashutils
       - name: run bats tests
         run: ./helper.sh test
-      - name: Verify .bashutils is up to date
+      - name: Verify bashutils is up to date
         run: |
           ./helper.sh build
-          git diff --exit-code -- .bashutils
+          git diff --exit-code -- bashutils
       - name: Create release artifacts
         run: ./helper.sh create_release_artifacts
       - name: Create GitHub release

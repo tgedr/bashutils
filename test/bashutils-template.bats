@@ -3,10 +3,10 @@
 setup() {
   TEST_DIR="$(mktemp -d)"
   cp "$BATS_TEST_DIRNAME/../bashutils-template.sh" "$TEST_DIR/bashutils-template.sh"
-  cp "$BATS_TEST_DIRNAME/../.bashutils" "$TEST_DIR/.bashutils"
+  cp "$BATS_TEST_DIRNAME/../bashutils" "$TEST_DIR/bashutils"
   chmod +x "$TEST_DIR/bashutils-template.sh"
   # Skip remote update checks so tests run offline and deterministically.
-  touch "$TEST_DIR/.bashutils.last_check"
+  touch "$TEST_DIR/bashutils.last_check"
 }
 
 teardown() {
