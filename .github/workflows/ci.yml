@@ -36,3 +36,5 @@ jobs:
           git add .version
           git diff --cached --quiet || git commit -m "auto: update .version [skip ci]"
           git push
+        env:
+          GH_TOKEN: ${{ github.token }}
