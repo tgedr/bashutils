@@ -948,6 +948,27 @@ generate_pdf_from_md() {
   uv run python -c "from tgedr_pycommons.cicd.markdown_to_pdf import convert; convert('$input_md', '$output_pdf')"
 }
 
+############################
+#   name: create_github_release
+#   purpose: creates a GitHub release for a given version tag, uploading all files from dist/; supports draft mode via RELEASE_DRAFT env var
+#   parameters: $1 (version tag string)
+#   requires: gh CLI, RELEASE_DRAFT (env var, optional)
+############################
+create_github_release(){
+  info "[create_github_release|in] ($1)"
+
+  [ -z "$1" ] && err "[create_github_release] missing argument VERSION" && return 1
+  local VERSION="$1"
+  local is_draft="false"
+  if [ "$RELEASE_DRAFT" = "true" ]; then
+    is_draft="true"
+  fi
+  
+  gh release create "$VERSION" "dist"/* --title "Release $VERSION" --draft="$is_draft" --notes "check release content for more details"
+  [ "$?" -ne "0" ] && err "[create_github_release] failed to create release" && return 1
+  
+  info "[create_github_release|out]"
+}
 
 ##########################################
 #######     ------- cdk -------    #######
