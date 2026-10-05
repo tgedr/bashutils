@@ -25,11 +25,14 @@ jobs:
       - name: Create release artifacts
         run: ./helper.sh create_release_artifacts
       - name: Create GitHub release
+        id: create_release
+        if: github.ref == 'refs/heads/main'
         run: ./helper.sh create_release
         env: 
           # RELEASE_DRAFT: "true"
           GH_TOKEN: ${{ github.token }}
       - name: 'commit and push updated files'
+        if: github.ref == 'refs/heads/main' && steps.create_release.outcome == 'success'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
