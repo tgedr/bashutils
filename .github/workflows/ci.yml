@@ -28,7 +28,7 @@ jobs:
       - name: Create GitHub release
         run: ./helper.sh create_github_release
         env: 
-          RELEASE_DRAFT: "true"
+          # RELEASE_DRAFT: "true"
           GH_TOKEN: ${{ github.token }}
       - name: 'commit and push updated version file'
         run: |

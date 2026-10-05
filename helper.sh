@@ -51,6 +51,7 @@ export INCLUDE_FILE=${INCLUDE_FILE:-"bashutils"}
 export BASHUTILS_URL=${BASHUTILS_URL:-"https://api.github.com/repos/tgedr/bashutils/contents/bashutils"}
 export BASHUTILS_CHECKSUM_URL=${BASHUTILS_CHECKSUM_URL:-"https://api.github.com/repos/tgedr/bashutils/contents/bashutils.checksum"}
 export BASHUTILS_CHECK_INTERVAL_SECONDS=${BASHUTILS_CHECK_INTERVAL_SECONDS:-"86400"}
+export REPO="tgedr/bashutils"
 
 get_file_mtime_epoch() {
   local file="$1"
@@ -308,7 +309,62 @@ create_github_release(){
   
   info "[create_github_release|out]"
 }
+############################
+#   name: download_github_release_files
+#   purpose: downloads all release assets from a GitHub release by version tag using the assets API (avoids proxy-blocked redirects); supports optional token authentication
+#   parameters: $1 (repository in owner/repo format), $2 (version tag), $3 (target download directory), $4 (optional GitHub API token)
+#   requires: curl, python3, this_folder
+############################
+download_github_release_files(){
+  info "[download_github_release_files|in] ($1, $2, $3, ${4:0:7})"
 
+  [ -z "$1" ] && err "[download_github_release_files] missing argument REPO" && return 1
+  local REPO="$1"
+  [ -z "$2" ] && err "[download_github_release_files] missing argument VERSION" && return 1
+  local VERSION="$2"
+  [ -z "$3" ] && err "[download_github_release_files] missing argument TARGET_DIR" && return 1
+  local TARGET_DIR="$3"
+  
+  _pwd=$(pwd)
+  cd "$TARGET_DIR"
+
+  local AUTH_HEADER=""
+  [ -n "$GITHUB_TOKEN" ] && AUTH_HEADER="-H \"Authorization: token $GITHUB_TOKEN\""
+
+  # Use assets API with Accept: application/octet-stream to avoid redirect to
+  # objects.githubusercontent.com (which may be blocked by proxies like Zscaler)
+  local release_json
+  release_json=$(eval curl -fsSL "$AUTH_HEADER" "\"https://api.github.com/repos/$REPO/releases/tags/$VERSION\"")
+  result="$?"
+  if [ "$result" -ne "0" ]; then
+    err "[download_github_release_files] failed to fetch release metadata"
+    cd "$_pwd"
+    return 1
+  fi
+
+  echo "$release_json" | python3 -c "
+import sys, json
+assets = json.load(sys.stdin).get('assets', [])
+for a in assets:
+    print(a['id'], a['name'])
+" | while read -r asset_id asset_name; do
+    info "[download_github_release_files] downloading asset: $asset_name (id: $asset_id)"
+    eval curl -fsSL "$AUTH_HEADER" \
+      -H "\"Accept: application/octet-stream\"" \
+      -o "\"$asset_name\"" \
+      "\"https://api.github.com/repos/$REPO/releases/assets/$asset_id\""
+    if [ "$?" -ne "0" ]; then
+      err "[download_github_release_files] failed to download asset: $asset_name"
+      cd "$_pwd"
+      return 1
+    fi
+  done
+  result="$?"
+  cd "$_pwd"
+
+  [ "$result" -ne "0" ] && err "[download_github_release_files|out] => ${result}" && return 1
+  info "[download_github_release_files|out] => ${result}"
+}
 
 # add your custom bash functions above this line
 
@@ -325,6 +381,7 @@ usage() {
       - test                        runs tests
       - build                       rebuild bashutils by concatenating all files in sections/
       - create_release_artifacts    create release artifacts in the dist directory
+      - get_github_release <VERSION> [TARGET_DIR=this_folder] downloads bashutils from a specific GitHub release (assumes GITHUB_TOKEN is set)
 EOM
   exit 1
 }
@@ -350,6 +407,9 @@ case "$1" in
     ;;
   create_github_release)
     create_github_release
+    ;;
+  get_github_release)
+    download_github_release_files "$REPO" "$2" "${3:-$this_folder}"
     ;;
   *)
     usage

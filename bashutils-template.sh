@@ -51,6 +51,7 @@ export INCLUDE_FILE=${INCLUDE_FILE:-"bashutils"}
 export BASHUTILS_URL=${BASHUTILS_URL:-"https://api.github.com/repos/tgedr/bashutils/contents/bashutils"}
 export BASHUTILS_CHECKSUM_URL=${BASHUTILS_CHECKSUM_URL:-"https://api.github.com/repos/tgedr/bashutils/contents/bashutils.checksum"}
 export BASHUTILS_CHECK_INTERVAL_SECONDS=${BASHUTILS_CHECK_INTERVAL_SECONDS:-"86400"}
+export REPO="tgedr/bashutils"
 
 get_file_mtime_epoch() {
   local file="$1"
@@ -165,6 +166,57 @@ download_bashutils_if_newer() {
 
 }
 
+download_github_release_files(){
+  info "[download_github_release_files|in] ($1, $2, $3, ${4:0:7})"
+
+  [ -z "$1" ] && err "[download_github_release_files] missing argument REPO" && return 1
+  local REPO="$1"
+  [ -z "$2" ] && err "[download_github_release_files] missing argument VERSION" && return 1
+  local VERSION="$2"
+  [ -z "$3" ] && err "[download_github_release_files] missing argument TARGET_DIR" && return 1
+  local TARGET_DIR="$3"
+  
+  _pwd=$(pwd)
+  cd "$TARGET_DIR"
+
+  local AUTH_HEADER=""
+  [ -n "$GITHUB_TOKEN" ] && AUTH_HEADER="-H \"Authorization: token $GITHUB_TOKEN\""
+
+  # Use assets API with Accept: application/octet-stream to avoid redirect to
+  # objects.githubusercontent.com (which may be blocked by proxies like Zscaler)
+  local release_json
+  release_json=$(eval curl -fsSL "$AUTH_HEADER" "\"https://api.github.com/repos/$REPO/releases/tags/$VERSION\"")
+  result="$?"
+  if [ "$result" -ne "0" ]; then
+    err "[download_github_release_files] failed to fetch release metadata"
+    cd "$_pwd"
+    return 1
+  fi
+
+  echo "$release_json" | python3 -c "
+import sys, json
+assets = json.load(sys.stdin).get('assets', [])
+for a in assets:
+    print(a['id'], a['name'])
+" | while read -r asset_id asset_name; do
+    info "[download_github_release_files] downloading asset: $asset_name (id: $asset_id)"
+    eval curl -fsSL "$AUTH_HEADER" \
+      -H "\"Accept: application/octet-stream\"" \
+      -o "\"$asset_name\"" \
+      "\"https://api.github.com/repos/$REPO/releases/assets/$asset_id\""
+    if [ "$?" -ne "0" ]; then
+      err "[download_github_release_files] failed to download asset: $asset_name"
+      cd "$_pwd"
+      return 1
+    fi
+  done
+  result="$?"
+  cd "$_pwd"
+
+  [ "$result" -ne "0" ] && err "[download_github_release_files|out] => ${result}" && return 1
+  info "[download_github_release_files|out] => ${result}"
+}
+
 # -------------------------------
 # --- source variables files
 source_if_exists "$this_folder/$FILE_VARIABLES"
@@ -173,7 +225,7 @@ source_if_exists "$this_folder/$FILE_SECRETS"
 
 # ---------- include bashutils ----------
 BASHUTILS_UPDATE="${BASHUTILS_UPDATE:-0}"
-[ "$BASHUTILS_UPDATE" -eq "1" ] && download_bashutils_if_newer
+[ "$BASHUTILS_UPDATE" -eq "1" ] && download_github_release_files "$REPO" "$2" "$this_folder"
 . "$this_folder/$INCLUDE_FILE"
 
 # <=== HEADER SECTION END  <===
@@ -207,6 +259,7 @@ usage() {
   $(basename "$0") { option }
     options:
       - hello_world        says hello to the world
+      - get_github_release <VERSION> [TARGET_DIR=this_folder] downloads bashutils from a specific GitHub release (assumes GITHUB_TOKEN is set)
 EOM
   exit 1
 }
@@ -216,6 +269,9 @@ EOM
 case "$1" in
   hello_world)
     hello_world
+    ;;
+  get_github_release)
+    download_github_release_files "$REPO" "$2" "${3:-$this_folder}"
     ;;
   *)
     usage
