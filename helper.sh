@@ -285,6 +285,7 @@ create_release_artifacts(){
 create_github_release(){
   info "[create_github_release|in]"
 
+  local dist_dir="$this_folder/dist"
   local version_file="$this_folder/.version"
   read -r version < "$version_file"
 
@@ -293,7 +294,7 @@ create_github_release(){
     is_draft="true"
   fi
   
-  gh release create "$version" "dist"/* --title "Release $version" --draft="$is_draft" --notes "check release content for more details"
+  gh release create "$version" "$dist_dir"/* --title "Release $version" --draft="$is_draft" --notes "check release content for more details"
   [ "$?" -ne "0" ] && err "[create_github_release] failed to create release" && return 1
   
   info "[create_github_release|out]"
