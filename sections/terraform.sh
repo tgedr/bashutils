@@ -6,6 +6,7 @@
 #   name: terraform_autodeploy
 #   purpose: runs a full Terraform deployment (init → plan → apply --auto-approve) in the given folder
 #   parameters: $1 (path to the folder containing Terraform configuration files)
+#   returns: 0 if init, plan, and apply succeed, 1 if a required command or Terraform step fails
 #   requires: terraform
 ############################
 terraform_autodeploy(){
@@ -34,6 +35,7 @@ terraform_autodeploy(){
 #   name: terraform_autodestroy
 #   purpose: runs 'terraform destroy --auto-approve' in the given folder to tear down all managed infrastructure
 #   parameters: $1 (path to the folder containing Terraform configuration files)
+#   returns: 0 if destroy succeeds, 1 if the folder, required command, or Terraform step fails
 #   requires: terraform
 ############################
 

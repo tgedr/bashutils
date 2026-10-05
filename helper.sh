@@ -48,123 +48,103 @@ export FILE_VARIABLES=${FILE_VARIABLES:-".variables"}
 export FILE_LOCAL_VARIABLES=${FILE_LOCAL_VARIABLES:-".local_variables"}
 export FILE_SECRETS=${FILE_SECRETS:-".secrets"}
 export INCLUDE_FILE=${INCLUDE_FILE:-"bashutils"}
-export BASHUTILS_URL=${BASHUTILS_URL:-"https://api.github.com/repos/tgedr/bashutils/contents/bashutils"}
-export BASHUTILS_CHECKSUM_URL=${BASHUTILS_CHECKSUM_URL:-"https://api.github.com/repos/tgedr/bashutils/contents/bashutils.checksum"}
-export BASHUTILS_CHECK_INTERVAL_SECONDS=${BASHUTILS_CHECK_INTERVAL_SECONDS:-"86400"}
 export REPO="tgedr/bashutils"
 
-get_file_mtime_epoch() {
-  local file="$1"
-  local mtime
-  mtime="$(stat -c %Y "$file" 2>/dev/null)" && {
-    echo "$mtime"
-    return 0
-  }
-  mtime="$(stat -f %m "$file" 2>/dev/null)" && {
-    echo "$mtime"
-    return 0
-  }
-  return 1
+find_local_release(){
+  local local_file="$this_folder/$INCLUDE_FILE"
+  local local_version=0
+  if [ -f "$local_file" ]; then
+    IFS= read -r version_line < "$local_file"
+    local_version=${version_line##*: }
+    # info "[find_local_release] local version: $local_version"
+    if [[ ! $local_version =~ ^[0-9]+$ ]]; then
+      err "[find_local_release] version is not a valid integer: $local_version"
+      return 1
+    fi
+  fi
+  echo "$local_version"
 }
 
-download_bashutils_if_newer() {
-  local bashutils="$this_folder/$INCLUDE_FILE"
-  local bashutils_last_check="$this_folder/${INCLUDE_FILE}.last_check"
-  local bashutils_checksum="$this_folder/${INCLUDE_FILE}.checksum"
-  local just_fetch="0"
-  local now_epoch
-  local last_check_epoch
-  local elapsed
-  local did_remote_check=0
-  local bashutils_tmp
-  local checksum_tmp
-  local actual_sha256
-  local expected_sha256
+find_latest_release(){
+  [ -z $1 ] && err "[find_latest_release] missing argument REPO" && return 1
+  local REPO="$1"
+  local latest_release
+  latest_release=$(gh release view --repo "$REPO" --json tagName --jq .tagName) || return 1
+  echo "$latest_release"
+}
 
-  
-  if [ -f "$bashutils" ] && [ -f "$bashutils_last_check" ]; then
-    now_epoch=$(date +%s)
-    if last_check_epoch="$(get_file_mtime_epoch "$bashutils_last_check")"; then
-      case "$last_check_epoch" in
-        ''|*[!0-9]*)
-          warn "[download_bashutils_if_newer] invalid last check marker timestamp, forcing a remote check"
-          ;;
-        *)
-          elapsed=$((now_epoch - last_check_epoch))
-          if [ "$elapsed" -lt "$BASHUTILS_CHECK_INTERVAL_SECONDS" ]; then
-            info "[download_bashutils_if_newer] no need to update $INCLUDE_FILE (last checked $elapsed seconds ago)"
-            return 0
-          fi
-          ;;
-      esac
-    fi
+define_release_to_update(){
+  local local_release
+  local latest_release
+  local_release=$(find_local_release)
+  [ "$?" -ne "0" ] && err "[update_bashutils] failed to find local release" && return 1
+  latest_release=$(find_latest_release "$REPO")
+  [ "$?" -ne "0" ] && err "[update_bashutils] failed to find latest release" && return 1
+  local result
+  if (( local_release < latest_release )); then
+    read -r -p "proceed to update? [y/N] " answer
+    case "$answer" in
+      [Yy])
+        result="$latest_release"
+        ;;
+      *)
+        result=-1 # cancelled
+        ;;
+    esac
   else
-    info "[download_bashutils_if_newer] no $INCLUDE_FILE or ${INCLUDE_FILE}.last_check found - we will fetch it"
-    just_fetch="1"
+    result=-2 # local release is up-to-date
   fi
+  echo "$result"
+}
 
-  if ! command -v curl >/dev/null 2>&1; then
-    err "[download_bashutils_if_newer] please install curl"
+update_bashutils(){
+  info "[update_bashutils|in] ($1)"
+
+  [ -z "$BASHUTILS_AUTO_UPDATE" ] || [ "$BASHUTILS_AUTO_UPDATE" -ne "1" ] && err "[update_bashutils] auto update is disabled" && return 1
+
+  local _pwd=$(pwd)
+  local release
+  local result
+
+  release=$(define_release_to_update)
+  [ "$?" -ne "0" ] && err "[update_bashutils] failed to define the release to update" && return 1
+  [ "$release" -eq "-1" ] && info "[update_bashutils] no update performed, update cancelled" && return 0
+  [ "$release" -eq "-2" ] && info "[update_bashutils] no update performed, local release is up-to-date" && return 0
+
+  # Use assets API with Accept: application/octet-stream to avoid redirect to
+  # objects.githubusercontent.com (which may be blocked by proxies like Zscaler)
+  local release_json
+  release_json=$(eval curl -fsSL "\"https://api.github.com/repos/$REPO/releases/tags/$release\"")
+  result="$?"
+  if [ "$result" -ne "0" ]; then
+    err "[update_bashutils] failed to fetch release metadata"
+    cd "$_pwd"
     return 1
   fi
 
-  if ! command -v sha256sum >/dev/null 2>&1; then
-    err "[download_bashutils_if_newer] please install sha256sum to verify $INCLUDE_FILE"
-    return 1
-  fi
+  cd "$this_folder" || exit 1
 
-  checksum_tmp="$(mktemp)"
-  if ! curl -fsSL "$BASHUTILS_CHECKSUM_URL" \
-    | python3 -c "import sys,json,base64; sys.stdout.buffer.write(base64.b64decode(json.load(sys.stdin)['content']))" \
-    > "$checksum_tmp"; then
-    err "[download_bashutils_if_newer] failed to download $(basename "$BASHUTILS_CHECKSUM_URL")"
-    rm -f "$checksum_tmp"
-    return 1
-  fi
-  expected_sha256=$(cat "$checksum_tmp" | awk '{print $1}')
-  info "[download_bashutils_if_newer] expected_sha256: $expected_sha256"
-  rm -f "$checksum_tmp"
-
-  if [ "$just_fetch" -ne "1" ]; then
-      info "[download_bashutils_if_newer] checking existing $INCLUDE_FILE"
-
-      actual_sha256=$(cat "$bashutils_checksum" | awk '{print $1}')
-      info "[download_bashutils_if_newer] actual_sha256: $actual_sha256"
-      
-      if [ "$actual_sha256" != "$expected_sha256" ]; then
-        info "[download_bashutils_if_newer] $INCLUDE_FILE is outdated (actual: $actual_sha256, expected: $expected_sha256), updating it"
-        just_fetch="1"
-      else
-        info "[download_bashutils_if_newer] $INCLUDE_FILE is up to date"
-      fi
-  fi
-
-
-  if [ "$just_fetch" -eq "1" ]; then
-    bashutils_tmp="$(mktemp)"
-    curl -fsSL "$BASHUTILS_URL" \
-      | python3 -c "import sys,json,base64; sys.stdout.buffer.write(base64.b64decode(json.load(sys.stdin)['content']))" \
-      > "$bashutils_tmp"
-    if [ ! "$?" -eq "0" ]; then
-      err "[download_bashutils_if_newer] failed to download $INCLUDE_FILE"
-      rm -f "$bashutils_tmp"
+  echo "$release_json" | python3 -c "
+  import sys, json
+  assets = json.load(sys.stdin).get('assets', [])
+  for a in assets:
+      print(a['id'], a['name'])
+  " | while read -r asset_id asset_name; do
+    info "[get_updated_release] downloading asset: $asset_name (id: $asset_id)"
+    eval curl -fsSL -H "\"Accept: application/octet-stream\"" \
+      -o "\"$asset_name\"" \
+      "\"https://api.github.com/repos/$REPO/releases/assets/$asset_id\""
+    if [ "$?" -ne "0" ]; then
+      err "[get_updated_release] failed to download asset: $asset_name"
+      cd "$_pwd"
       return 1
     fi
-    info "[download_bashutils_if_newer] downloaded $INCLUDE_FILE to $bashutils_tmp"
-    actual_sha256="$(sha256sum "$bashutils_tmp" | awk '{print $1}')"
-    info "[download_bashutils_if_newer] actual_sha256: $actual_sha256"
+  done
+  result="$?"
+  cd "$_pwd"
 
-    if [ "$actual_sha256" != "$expected_sha256" ]; then
-      info "[download_bashutils_if_newer] $INCLUDE_FILE checksum is not equal to the expected one (actual: $actual_sha256, expected: $expected_sha256), aborting update"
-      return 1
-    fi
-
-    mv "$bashutils_tmp" "$bashutils"
-    rm -f "$bashutils_tmp"
-    touch "$bashutils_last_check" || warn "[download_bashutils_if_newer] failed to update last check marker; next run will perform a remote check"
-    info "[download_bashutils_if_newer] updated $INCLUDE_FILE or ${INCLUDE_FILE}.last_check "
-  fi
-
+  [ "$result" -ne "0" ] && err "[get_updated_release|out] => ${result}" && return 1
+  info "[get_updated_release|out] => ${result}"
 }
 
 # -------------------------------
@@ -172,6 +152,11 @@ download_bashutils_if_newer() {
 source_if_exists "$this_folder/$FILE_VARIABLES"
 source_if_exists "$this_folder/$FILE_LOCAL_VARIABLES"
 source_if_exists "$this_folder/$FILE_SECRETS"
+
+# ---------- include bashutils ----------
+BASHUTILS_AUTO_UPDATE="${BASHUTILS_AUTO_UPDATE:-0}"
+update_bashutils
+. "$this_folder/$INCLUDE_FILE"
 
 # <=== HEADER SECTION END  <===
 
@@ -224,6 +209,18 @@ test(){
   info "$msg"
 }
 
+bump_up_version(){
+  info "[bump_up_version|in]"
+  local version_file="$this_folder/.version"
+  local version
+
+  read -r value < "$version_file"
+  version=$((10#$value + 1))
+  info "[bump_up_version] incrementing version to $version"
+  echo "$version" > "$version_file"
+  info "[bump_up_version|out]"
+}
+
 build_bashutils(){
   info "[build_bashutils|in]"
   local sections_dir="$this_folder/sections"
@@ -231,6 +228,8 @@ build_bashutils(){
   local out_file="$this_folder/$INCLUDE_FILE"
   local _pwd
   local checksum_result
+  local version
+  local version_file="$this_folder/.version"
   _pwd=$(pwd)
 
   [ ! -d "$sections_dir" ] && err "[build_bashutils] sections folder not found: $sections_dir" && exit 1
@@ -239,7 +238,10 @@ build_bashutils(){
   files=("$sections_dir"/*.sh)
   [ ${#files[@]} -eq 0 ] && err "[build_bashutils] no .sh files found in $sections_dir" && exit 1
 
-  > "$out_file"
+  read -r version < "$version_file"
+  printf '%s\n' "# BASHUTILS VERSION: $version" > "$out_file"
+
+  >> "$out_file"
   for f in "${files[@]}"; do
     cat "$f" >> "$out_file" || { err "[build_bashutils] failed to append $f to $out_file"; exit 1; }
     echo >> "$out_file" || { err "[build_bashutils] failed to append newline to $out_file"; exit 1; }
@@ -265,19 +267,11 @@ create_release_artifacts(){
   info "[create_release_artifacts|in]"
   local dist_dir="$this_folder/dist"
   local out_file="$this_folder/$INCLUDE_FILE"
-  local version
-  local version_file="$this_folder/.version"
 
   rm -rf "$dist_dir"
   mkdir -p "$dist_dir"
   cp "$out_file" "$dist_dir/" || { err "[create_release_artifacts] failed to move $INCLUDE_FILE to $dist_dir"; exit 1; }
   cp "${out_file}.checksum" "$dist_dir/" || { err "[create_release_artifacts] failed to move ${out_file}.checksum to $dist_dir"; exit 1; }
-
-  read -r value < "$version_file"
-  value=$((10#$value + 1))
-  info "[create_release_artifacts] incremented version to $value"
-  printf '%s\n' "$value" > "$version_file"
-
   info "[create_release_artifacts|out] => 0"
 }
 
@@ -285,10 +279,13 @@ create_github_release(){
   info "[create_github_release|in]"
 
   local dist_dir="$this_folder/dist"
-  local version_file="$this_folder/.version"
+  local include_file="$dist_dir/$INCLUDE_FILE"
   local -a release_assets=()
   local asset
-  read -r version < "$version_file"
+
+  IFS= read -r version_line < "$include_file"
+  version=${version_line##*: }
+  info "[create_github_release] creating release version: $version"
 
   for asset in "$dist_dir"/.[!.]* "$dist_dir"/*; do
     [ -f "$asset" ] && release_assets+=("$asset")
@@ -309,62 +306,8 @@ create_github_release(){
   
   info "[create_github_release|out]"
 }
-############################
-#   name: download_github_release_files
-#   purpose: downloads all release assets from a GitHub release by version tag using the assets API (avoids proxy-blocked redirects); supports optional token authentication
-#   parameters: $1 (repository in owner/repo format), $2 (version tag), $3 (target download directory), $4 (optional GitHub API token)
-#   requires: curl, python3, this_folder
-############################
-download_github_release_files(){
-  info "[download_github_release_files|in] ($1, $2, $3, ${4:0:7})"
 
-  [ -z "$1" ] && err "[download_github_release_files] missing argument REPO" && return 1
-  local REPO="$1"
-  [ -z "$2" ] && err "[download_github_release_files] missing argument VERSION" && return 1
-  local VERSION="$2"
-  [ -z "$3" ] && err "[download_github_release_files] missing argument TARGET_DIR" && return 1
-  local TARGET_DIR="$3"
-  
-  _pwd=$(pwd)
-  cd "$TARGET_DIR"
 
-  local AUTH_HEADER=""
-  [ -n "$GITHUB_TOKEN" ] && AUTH_HEADER="-H \"Authorization: token $GITHUB_TOKEN\""
-
-  # Use assets API with Accept: application/octet-stream to avoid redirect to
-  # objects.githubusercontent.com (which may be blocked by proxies like Zscaler)
-  local release_json
-  release_json=$(eval curl -fsSL "$AUTH_HEADER" "\"https://api.github.com/repos/$REPO/releases/tags/$VERSION\"")
-  result="$?"
-  if [ "$result" -ne "0" ]; then
-    err "[download_github_release_files] failed to fetch release metadata"
-    cd "$_pwd"
-    return 1
-  fi
-
-  echo "$release_json" | python3 -c "
-import sys, json
-assets = json.load(sys.stdin).get('assets', [])
-for a in assets:
-    print(a['id'], a['name'])
-" | while read -r asset_id asset_name; do
-    info "[download_github_release_files] downloading asset: $asset_name (id: $asset_id)"
-    eval curl -fsSL "$AUTH_HEADER" \
-      -H "\"Accept: application/octet-stream\"" \
-      -o "\"$asset_name\"" \
-      "\"https://api.github.com/repos/$REPO/releases/assets/$asset_id\""
-    if [ "$?" -ne "0" ]; then
-      err "[download_github_release_files] failed to download asset: $asset_name"
-      cd "$_pwd"
-      return 1
-    fi
-  done
-  result="$?"
-  cd "$_pwd"
-
-  [ "$result" -ne "0" ] && err "[download_github_release_files|out] => ${result}" && return 1
-  info "[download_github_release_files|out] => ${result}"
-}
 
 # add your custom bash functions above this line
 
@@ -377,39 +320,39 @@ usage() {
   usage:
   $(basename "$0") { option }
     options:
+      - update_bashutils [VERSION]  updates bashutils to the latest or a specific GitHub release
       - reqs                        installs required tools and dependencies
       - test                        runs tests
       - build                       rebuild bashutils by concatenating all files in sections/
       - create_release_artifacts    create release artifacts in the dist directory
-      - get_github_release <VERSION> [TARGET_DIR=this_folder] downloads bashutils from a specific GitHub release (assumes GITHUB_TOKEN is set)
+      - create_release              create a new GitHub release for bashutils
 EOM
   exit 1
 }
 
 # -------------------------------------
 
-
 case "$1" in
+  update_bashutils)
+    BASHUTILS_AUTO_UPDATE=1 update_bashutils "$2"
+    ;;
   reqs)
     reqs
     ;;
   test)
     test
     ;;
+  bump_up_version)
+    bump_up_version
+    ;;
   build)
     build_bashutils
-    ;;
-  download_bashutils_if_newer)
-    download_bashutils_if_newer
     ;;
   create_release_artifacts)
     create_release_artifacts
     ;;
-  create_github_release)
+  create_release)
     create_github_release
-    ;;
-  get_github_release)
-    download_github_release_files "$REPO" "$2" "${3:-$this_folder}"
     ;;
   *)
     usage
@@ -417,3 +360,4 @@ case "$1" in
 esac
 
 # <=== FOOTER SECTION END  <===
+

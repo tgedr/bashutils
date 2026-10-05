@@ -35,16 +35,31 @@ gh api repos/tgedr/bashutils/contents/bashutils-template.sh \
 
 the downloaded file is a regular bash script that you can rename and customize for your project.
 
-### usage
+### `helper.sh` usage
 
-- if non-existent, it creates the files `.variables` (should be version-managed), `.local_variables` and `.secrets` (these 2 are for personal development purposes and should NOT be version-managed) next to the script
-- it downloads `bashutils` on the first run
+- when invoked, `helper.sh`, if non-existent it creates the files `.variables` (should be version-managed), `.local_variables` and `.secrets` (these latest 2 are for personal development purposes and should NOT be version-managed) next to the script
+- you should at first download `bashutils`: `./helper.sh update_bashutils`
 - it provides a set of logging functions
-- on later runs it checks for updates at most once per day and replaces the local `bashutils` from `main` only when newer
-- every downloaded `bashutils` file is verified with SHA256 using `bashutils.checksum`
-- you can now reuse `bashutils` functions by referencing functions in your own `.helper.sh`:
+- `bashutils` functions are included in `helper.sh`:
+  ```
+  export INCLUDE_FILE=${INCLUDE_FILE:-"bashutils"}
+  ...
+  # ---------- include bashutils ----------
+  BASHUTILS_AUTO_UPDATE="${BASHUTILS_AUTO_UPDATE:-0}"
+  update_bashutils
+  . "$this_folder/$INCLUDE_FILE"
+  ```
+- we can automate the bashutils update by adding to `.local_variables`:
+  ```
+  export BASHUTILS_AUTO_UPDATE=1
+  ```
+
+- you can now reuse `bashutils` functions by referencing functions in your own `helper.sh`:
   ```bash
   case "$1" in
+    update_bashutils)
+      BASHUTILS_AUTO_UPDATE=1 update_bashutils "$2"
+      ;;
     reqs)
       reqs
       ;;
@@ -77,16 +92,17 @@ the downloaded file is a regular bash script that you can rename and customize f
 - treat `sections/` as the source of truth for `bashutils`
 - after updating `sections/`, regenerate `bashutils` with:
 
-```bash
-./helper.sh build_bashutils
-```
+  ```bash
+  ./helper.sh build
+  ```
+- have a look into the CI workflow in `.github/workflows/ci.yml`
 
-- commit both the changed `sections/*` source files and the rebuilt `bashutils` file in the same commit/PR
+- push the changes in `sections/*` source files in a PR
 
 ## tests
 
 this repository uses [bats-core](https://github.com/bats-core/bats-core) for tests:
 
 ```bash
-bats test
+./helper.sh test
 ```

@@ -6,6 +6,7 @@
 #   name: npm_deps
 #   purpose: runs 'npm install' in the specified project directory
 #   parameters: $1 (path to the directory containing package.json)
+#   returns: 0 if dependencies install, 1 if the directory is missing or npm fails
 #   requires: npm
 ############################
 npm_deps(){
@@ -29,6 +30,7 @@ npm_deps(){
 #   name: npm_publish
 #   purpose: authenticates against a private npm registry and publishes the package as public
 #   parameters: $1 (registry hostname, e.g. npm.pkg.github.com), $2 (auth token), $3 (path to package folder)
+#   returns: 0 if npm publishes successfully, 1 if arguments or publishing fail
 #   requires: npm
 ############################
 

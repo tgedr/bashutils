@@ -7,6 +7,7 @@
 #   purpose: prints a quick-reference cheat sheet of commonly used commands covering:
 #            Python virtualenv/Jupyter, AWS CDK (TypeScript), AWS CLI, and git configuration
 #   parameters: none
+#   returns: 0 after printing the command reference
 ############################
 commands() {
   cat <<EOM

@@ -239,10 +239,12 @@ load_section() {
   local release_dist="$release_root/dist"
   mkdir -p "$release_dist"
   cp "$ROOT_DIR/helper.sh" "$release_root/helper.sh"
+  cp "$ROOT_DIR/bashutils" "$release_root/bashutils"
   printf '14\n' > "$release_root/.version"
-  touch "$release_dist/bashutils" "$release_dist/bashutils.checksum" "$release_dist/.version"
+  printf '# BASHUTILS VERSION: 14\n' > "$release_dist/bashutils"
+  touch "$release_dist/bashutils.checksum" "$release_dist/.version"
 
-  run env RELEASE_DRAFT=true bash "$release_root/helper.sh" create_github_release
+  run env RELEASE_DRAFT=true bash "$release_root/helper.sh" create_release
   [ "$status" -eq 0 ]
   grep -F "$release_dist/bashutils" "$COMMAND_LOG"
   grep -F "$release_dist/bashutils.checksum" "$COMMAND_LOG"
@@ -260,7 +262,7 @@ load_section() {
 
   : > "$COMMAND_LOG"
   rm -f "$release_dist/bashutils" "$release_dist/bashutils.checksum" "$release_dist/.version"
-  run env RELEASE_DRAFT=true bash "$release_root/helper.sh" create_github_release
+  run env RELEASE_DRAFT=true bash "$release_root/helper.sh" create_release
   [ "$status" -eq 1 ]
   [[ "$output" == *"no release assets found"* ]]
   [ ! -s "$COMMAND_LOG" ]

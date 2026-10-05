@@ -1,3 +1,4 @@
+# BASHUTILS VERSION: 1
 ##########################################
 #######  ------- assorted -------  #######
 ##########################################
@@ -70,6 +71,7 @@ zip_js_lambda_function(){
 #   name: get_function_release
 #   purpose: downloads a named artifact from the latest GitHub release of a repository into this_folder
 #   parameters: $1 (GitHub repository in 'owner/repo' format), $2 (artifact filename to match)
+#   returns: 0 after the download pipeline completes
 #   requires: curl, wget, this_folder
 ############################
 
@@ -96,6 +98,7 @@ get_function_release(){
 #   name: download_function
 #   purpose: downloads a named artifact from the latest GitHub release of a repository and saves it to a specific local file
 #   parameters: $1 (GitHub repository in 'owner/repo' format), $2 (artifact filename to match), $3 (local destination file path)
+#   returns: 0 on successful download, 1 if required arguments or the download are invalid
 #   requires: curl, wget
 ############################
 
@@ -121,6 +124,7 @@ download_function(){
 #   purpose: makes an authenticated GET request to a Grafana API endpoint through a proxy/gateway,
 #            passing both an Azure bearer token and a Grafana service account token
 #   parameters: $1 (Azure OAuth2 access token), $2 (Grafana service account API token), $3 (Grafana API URL)
+#   returns: 0 if the request succeeds, 1 if a required argument is missing or curl fails
 #   requires: curl
 ############################
 
@@ -143,6 +147,131 @@ call_grafana_api(){
   info "[call_grafana_api|out] => ${response}"
 }
 
+############################
+#   name: find_local_release
+#   purpose: reads and prints the integer version from the first line of the local bashutils file
+#   parameters: none
+#   returns: 0 and prints the version (or 0 if the file is absent), 1 if the version is not an integer
+#   requires: this_folder, INCLUDE_FILE
+############################
+find_local_release(){
+  local local_file="$this_folder/$INCLUDE_FILE"
+  local local_version=0
+  if [ -f "$local_file" ]; then
+    IFS= read -r version_line < "$local_file"
+    local_version=${version_line##*: }
+    # info "[find_local_release] local version: $local_version"
+    if [[ ! $local_version =~ ^[0-9]+$ ]]; then
+      err "[find_local_release] version is not a valid integer: $local_version"
+      return 1
+    fi
+  fi
+  echo "$local_version"
+}
+
+############################
+#   name: find_latest_release
+#   purpose: retrieves and prints the latest published release tag for a GitHub repository
+#   parameters: $1 (repository in 'owner/repo' format)
+#   returns: 0 and prints the tag, or 1 if the repository is missing or gh fails
+#   requires: gh
+############################
+find_latest_release(){
+  [ -z $1 ] && err "[find_latest_release] missing argument REPO" && return 1
+  local REPO="$1"
+  local latest_release
+  latest_release=$(gh release view --repo "$REPO" --json tagName --jq .tagName) || return 1
+  echo "$latest_release"
+}
+
+############################
+#   name: define_release_to_update
+#   purpose: compares the local integer version with the latest release and prompts before selecting an update
+#   parameters: none
+#   returns: 0 and prints the selected release, -1 if the user cancels, -2 if up-to-date; nonzero on lookup failure
+#   requires: REPO, find_local_release, find_latest_release, interactive stdin
+############################
+define_release_to_update(){
+  local local_release
+  local latest_release
+  local_release=$(find_local_release)
+  [ "$?" -ne "0" ] && err "[update_bashutils] failed to find local release" && return 1
+  latest_release=$(find_latest_release "$REPO")
+  [ "$?" -ne "0" ] && err "[update_bashutils] failed to find latest release" && return 1
+  local result
+  if (( local_release < latest_release )); then
+    read -r -p "proceed to update? [y/N] " answer
+    case "$answer" in
+      [Yy])
+        result="$latest_release"
+        ;;
+      *)
+        result=-1 # cancelled
+        ;;
+    esac
+  else
+    result=-2 # local release is up-to-date
+  fi
+  echo "$result"
+}
+
+############################
+#   name: update_bashutils
+#   purpose: prompts to update the local bashutils file from the latest release and downloads its release assets
+#   parameters: none
+#   returns: 0 if updated, cancelled, or already current; 1 if updates are disabled or an operation fails
+#   requires: BASHUTILS_AUTO_UPDATE, REPO, this_folder, define_release_to_update, curl, python3
+#   side-effects: downloads release assets into this_folder
+############################
+update_bashutils(){
+  info "[update_bashutils|in] ($1)"
+
+  [ -z "$BASHUTILS_AUTO_UPDATE" ] || [ "$BASHUTILS_AUTO_UPDATE" -ne "1" ] && err "[update_bashutils] auto update is disabled" && return 1
+
+  local _pwd=$(pwd)
+  local release
+  local result
+
+  release=$(define_release_to_update)
+  [ "$?" -ne "0" ] && err "[update_bashutils] failed to define the release to update" && return 1
+  [ "$release" -eq "-1" ] && info "[update_bashutils] no update performed, update cancelled" && return 0
+  [ "$release" -eq "-2" ] && info "[update_bashutils] no update performed, local release is up-to-date" && return 0
+
+  # Use assets API with Accept: application/octet-stream to avoid redirect to
+  # objects.githubusercontent.com (which may be blocked by proxies like Zscaler)
+  local release_json
+  release_json=$(eval curl -fsSL "\"https://api.github.com/repos/$REPO/releases/tags/$release\"")
+  result="$?"
+  if [ "$result" -ne "0" ]; then
+    err "[update_bashutils] failed to fetch release metadata"
+    cd "$_pwd"
+    return 1
+  fi
+
+  cd "$this_folder" || exit 1
+
+  echo "$release_json" | python3 -c "
+  import sys, json
+  assets = json.load(sys.stdin).get('assets', [])
+  for a in assets:
+      print(a['id'], a['name'])
+  " | while read -r asset_id asset_name; do
+    info "[get_updated_release] downloading asset: $asset_name (id: $asset_id)"
+    eval curl -fsSL -H "\"Accept: application/octet-stream\"" \
+      -o "\"$asset_name\"" \
+      "\"https://api.github.com/repos/$REPO/releases/assets/$asset_id\""
+    if [ "$?" -ne "0" ]; then
+      err "[get_updated_release] failed to download asset: $asset_name"
+      cd "$_pwd"
+      return 1
+    fi
+  done
+  result="$?"
+  cd "$_pwd"
+
+  [ "$result" -ne "0" ] && err "[get_updated_release|out] => ${result}" && return 1
+  info "[get_updated_release|out] => ${result}"
+}
 ##########################################
 #######     ------- aws -------    #######
 ##########################################
@@ -175,6 +304,7 @@ aws_find_kms_alias(){
 #   name: aws_get_cloudfront_cidr
 #   purpose: retrieves the CIDR entries from the CloudFront origin-facing managed prefix list and writes them as JSON to a file
 #   parameters: $1 (output file path)
+#   returns: 0 if the JSON file is written, 1 if the output argument is missing or writing fails
 #   requires: aws, jq
 ############################
 
@@ -198,6 +328,7 @@ aws_get_cloudfront_cidr(){
 #   purpose: configures a named AWS CLI profile with static credentials and region using 'aws configure'
 #   parameters: $1 (profile name), $2 (AWS access key ID), $3 (AWS secret access key),
 #               $4 (AWS region, e.g. eu-west-1), $5 (output format, default: json)
+#   returns: 0 if the profile is configured, 1 if required arguments or an AWS CLI command fails
 #   requires: aws
 ############################
 
@@ -494,6 +625,7 @@ verify_env(){
 #   name: package
 #   purpose: creates a bzip2-compressed tar archive from the project root
 #   parameters: none
+#   returns: 0 if the archive is created, 1 if tar fails
 #   requires: TAR_NAME (output archive path), INCLUDE_FILE (file/folder to archive), this_folder (project root)
 ############################
 package(){
@@ -514,6 +646,7 @@ package(){
 #            removes any existing line for the variable before appending the new value;
 #            if $3 is empty the variable entry is deleted without replacement
 #   parameters: $1 (file name, relative to this_folder), $2 (variable name), $3 (variable value, optional)
+#   returns: 0 after updating the file, 1 if required arguments are missing
 #   requires: this_folder (project root)
 ############################
 add_entry_to_file()
@@ -547,6 +680,7 @@ add_entry_to_file()
 #   name: add_entry_to_variables
 #   purpose: upserts an environment variable entry in the shared variables file (FILE_VARIABLES)
 #   parameters: $1 (variable name), $2 (variable value, optional — omit to delete the entry)
+#   returns: 0 after updating the file, 1 if the variable name is missing
 #   requires: FILE_VARIABLES
 ############################
 add_entry_to_variables()
@@ -564,6 +698,7 @@ add_entry_to_variables()
 #   name: add_entry_to_local_variables
 #   purpose: upserts an environment variable entry in the local variables file (FILE_LOCAL_VARIABLES)
 #   parameters: $1 (variable name), $2 (variable value, optional — omit to delete the entry)
+#   returns: 0 after updating the file, 1 if the variable name is missing
 #   requires: FILE_LOCAL_VARIABLES
 ############################
 add_entry_to_local_variables()
@@ -581,6 +716,7 @@ add_entry_to_local_variables()
 #   name: add_entry_to_secrets
 #   purpose: upserts an environment variable entry in the secrets file (FILE_SECRETS)
 #   parameters: $1 (variable name), $2 (secret value, optional — omit to delete the entry)
+#   returns: 0 after updating the file, 1 if the variable name is missing
 #   requires: FILE_SECRETS
 ############################
 add_entry_to_secrets()
@@ -621,6 +757,7 @@ git_tag_and_push()
 #   name: git_tag_and_push_auto_uv
 #   purpose: reads the project version from pyproject.toml via uv, then creates an annotated git tag on the latest commit and pushes all tags to remote
 #   parameters: none
+#   returns: 0 if the tag is created and pushed, 1 if tagging or pushing fails
 #   requires: uv (with tomllib), git, this_folder
 ############################
 git_tag_and_push_auto_uv()
@@ -643,6 +780,8 @@ git_tag_and_push_auto_uv()
 #   name: get_latest_tag
 #   purpose: retrieves the latest git tag from the repository
 #   parameters: none
+#   returns: 0 and prints the latest tag, 1 if no tag is available
+#   requires: git
 ############################
 get_latest_tag() {
   info "[get_latest_tag|in]" >&2
@@ -663,6 +802,7 @@ get_latest_tag() {
 #   name: changelog
 #   purpose: generates a CHANGELOG file from git log (format: hash, date, refs, subject)
 #   parameters: $1 (output filename, default: CHANGELOG)
+#   returns: 0 if the changelog is written, 1 if git log fails
 #   requires: this_folder (project root)
 ############################
 
@@ -694,6 +834,7 @@ changelog(){
 #               $4 (path segment replacement — target)
 #               $5 (import prefix to replace — origin, e.g. 'old_pkg.')
 #               $6 (import prefix replacement — target, e.g. 'new_pkg.')
+#   returns: 0 when processing completes, 1 if a required argument is missing
 #   requires: this_folder (project root)
 ############################
 
@@ -782,6 +923,7 @@ add_pypi_config(){
 #   purpose: ensures the 'uv' Python package manager is installed (installs via the official install script if absent);
 #            then runs 'uv init' if no pyproject.toml exists, or 'uv sync' otherwise
 #   parameters: none
+#   returns: 0 if uv initialization or synchronization succeeds, 1 if installation or setup fails
 #   requires: this_folder (project root)
 ############################
 
@@ -815,6 +957,7 @@ assert_uv_config(){
 #   name: print_uuid
 #   purpose: generates and prints a new UUID using uuidgen
 #   parameters: none
+#   returns: 0 after printing the UUID
 #   requires: uuidgen
 ############################
 
@@ -831,6 +974,7 @@ print_uuid(){
 #   name: collect_dot_git
 #   purpose: archives the .git directory of the project into a compressed tar archive
 #   parameters: $1 (output archive filename, default: git.tar.gz)
+#   returns: 0 if the archive is created, 1 if tar fails
 #   requires: tar, this_folder
 ############################
 collect_dot_git(){
@@ -852,6 +996,7 @@ collect_dot_git(){
 #   name: create_release_documentation
 #   purpose: assembles release documentation artifacts (git archive, PR approval PDF, QA PDF) into a single directory and compresses it into a tar archive
 #   parameters: $1 (git archive tar file path), $2 (PR approvals PDF file path), $3 (QA report PDF file path), $4 (output target directory)
+#   returns: 0 if the release archive is created, 1 if arguments are missing or tar fails
 #   requires: tar, this_folder
 ############################
 create_release_documentation(){
@@ -918,6 +1063,7 @@ function_report_wrapper(){
 #   name: generate_pr_approvals_md
 #   purpose: generates a markdown report of PR approvals for a given repository branch using tgedr_pycommons
 #   parameters: $1 (repository name), $2 (branch name), $3 (output markdown file path)
+#   returns: the exit status of the uv command, or 1 if a required argument is missing
 #   requires: uv (with tgedr_pycommons)
 ############################
 generate_pr_approvals_md() {
@@ -936,6 +1082,7 @@ generate_pr_approvals_md() {
 #   name: generate_pdf_from_md
 #   purpose: converts a markdown file to a PDF using tgedr_pycommons
 #   parameters: $1 (input markdown file path), $2 (output PDF file path)
+#   returns: the exit status of the uv command, or 1 if a required argument is missing
 #   requires: uv (with tgedr_pycommons)
 ############################
 generate_pdf_from_md() {
@@ -952,6 +1099,7 @@ generate_pdf_from_md() {
 #   name: create_github_release
 #   purpose: creates a GitHub release for a given version tag, uploading all files from dist/; supports draft mode via RELEASE_DRAFT env var
 #   parameters: $1 (version tag string)
+#   returns: 0 if the release is created, 1 if the tag is missing, no assets exist, or gh fails
 #   requires: gh CLI, RELEASE_DRAFT (env var, optional)
 ############################
 create_github_release(){
@@ -985,6 +1133,7 @@ create_github_release(){
 #   name: download_github_release_files
 #   purpose: downloads all release assets from a GitHub release by version tag using the assets API (avoids proxy-blocked redirects); supports optional token authentication
 #   parameters: $1 (repository in owner/repo format), $2 (version tag), $3 (target download directory), $4 (optional GitHub API token)
+#   returns: 0 if all assets download, 1 if arguments, metadata lookup, or a download fails
 #   requires: curl, python3, this_folder
 ############################
 download_github_release_files(){
@@ -1046,6 +1195,7 @@ for a in assets:
 #   purpose: globally installs all npm packages required for AWS CDK TypeScript development
 #   parameters: $1 (typescript version), $2 (aws-cdk version), $3 (ts-node version),
 #               $4 (@aws-cdk/integ-runner version), $5 (@aws-cdk/integ-tests-alpha version), $6 (jest version)
+#   returns: 0 if packages install, 1 if a required version is missing or npm fails
 #   requires: npm
 ############################
 cdk_global_reqs(){
@@ -1076,6 +1226,7 @@ cdk_global_reqs(){
 #   name: cdk_scaffolding
 #   purpose: initialises a new AWS CDK TypeScript app in the given directory using 'cdk init app'
 #   parameters: $1 (path to the target infrastructure directory)
+#   returns: 0 if the app is initialized, 1 if the directory is missing or cdk fails
 #   requires: cdk
 ############################
 
@@ -1102,6 +1253,7 @@ cdk_scaffolding(){
 #   parameters: $1 (typescript version), $2 (aws-cdk version), $3 (ts-node version),
 #               $4 (@aws-cdk/integ-runner version), $5 (@aws-cdk/integ-tests-alpha version),
 #               $6 (jest version), $7 (path to infrastructure directory)
+#   returns: 0 if dependencies install and scaffolding succeeds, 1 if either step fails
 #   requires: npm, cdk
 ############################
 
@@ -1140,6 +1292,7 @@ cdk_infra_bootstrap(){
 #   parameters: $1 (operation: on | off | bootstrap),
 #               $2 (infrastructure folder, default: infrastructure),
 #               $3 (stacks selector, default: --all)
+#   returns: 0 if the requested operation succeeds, 1 if a CDK command fails
 #   requires: cdk
 ############################
 
@@ -1194,6 +1347,7 @@ cdk_infra()
 #   name: cdk_setup
 #   purpose: runs 'npm install' in the CDK infrastructure directory to install project dependencies
 #   parameters: $1 (infrastructure folder path, default: infrastructure)
+#   returns: 0 if dependencies install, 1 if npm fails
 #   requires: npm
 ############################
 
@@ -1226,6 +1380,7 @@ cdk_setup()
 #   purpose: prints a quick-reference cheat sheet of commonly used commands covering:
 #            Python virtualenv/Jupyter, AWS CDK (TypeScript), AWS CLI, and git configuration
 #   parameters: none
+#   returns: 0 after printing the command reference
 ############################
 commands() {
   cat <<EOM
@@ -1264,6 +1419,7 @@ EOM
 #   purpose: authenticates interactively with Azure, retrieves a Databricks access token,
 #            and persists DATABRICKS_HOST and DATABRICKS_TOKEN via add_entry_to_variables/add_entry_to_secrets
 #   parameters: $1 (Databricks workspace URL, e.g. https://<workspace>.azuredatabricks.net), $2 (Azure subscription ID)
+#   returns: 0 after storing the workspace host and access token, 1 if a required argument is missing
 #   requires: az, add_entry_to_variables, add_entry_to_secrets
 ############################
 databricks_set_cli_access()
@@ -1286,6 +1442,7 @@ databricks_set_cli_access()
 #   name: databricks_bundle_deploy
 #   purpose: validates and deploys a Databricks Asset Bundle to the specified target environment
 #   parameters: $1 (path to the bundle folder containing databricks.yml), $2 (deployment target: local | main, default: local)
+#   returns: 0 if validation and deployment succeed, 1 if arguments are invalid or a command fails
 #   requires: databricks
 ############################
 
@@ -1316,6 +1473,7 @@ databricks_bundle_deploy(){
 #   name: databricks_bundle_destroy
 #   purpose: destroys all resources managed by a Databricks Asset Bundle in the specified target environment
 #   parameters: $1 (path to the bundle folder containing databricks.yml), $2 (deployment target: local | main, default: local)
+#   returns: 0 if destruction succeeds, 1 if arguments are invalid or databricks fails
 #   requires: databricks
 ############################
 
@@ -1345,6 +1503,7 @@ databricks_bundle_destroy(){
 #   name: databricks_delete_secret
 #   purpose: removes a secret key from a Databricks secret scope
 #   parameters: $1 (secret key name), $2 (secret scope name)
+#   returns: 0 if the secret is deleted, 1 if arguments are missing or databricks fails
 #   requires: databricks
 ############################
 
@@ -1367,6 +1526,7 @@ databricks_delete_secret(){
 #   name: databricks_set_secret
 #   purpose: creates a secret in a Databricks secret scope if it does not already exist; warns if already present
 #   parameters: $1 (secret key name), $2 (secret scope name), $3 (secret string value)
+#   returns: 0 if the secret exists or is created, 1 if arguments are missing or creation fails
 #   requires: databricks
 ############################
 
@@ -1398,6 +1558,7 @@ databricks_set_secret(){
 #   purpose: downloads a universal package from an Azure DevOps artifacts feed using the Azure CLI
 #   parameters: $1 (Azure DevOps organization URL), $2 (feed name), $3 (package name),
 #               $4 (package version), $5 (local download path, default: current directory)
+#   returns: 0 if the package downloads, 1 if arguments are missing or az fails
 #   requires: az (with azure-devops extension)
 ############################
 
@@ -1432,6 +1593,7 @@ get_azure_artifact(){
 #   name: npm_deps
 #   purpose: runs 'npm install' in the specified project directory
 #   parameters: $1 (path to the directory containing package.json)
+#   returns: 0 if dependencies install, 1 if the directory is missing or npm fails
 #   requires: npm
 ############################
 npm_deps(){
@@ -1455,6 +1617,7 @@ npm_deps(){
 #   name: npm_publish
 #   purpose: authenticates against a private npm registry and publishes the package as public
 #   parameters: $1 (registry hostname, e.g. npm.pkg.github.com), $2 (auth token), $3 (path to package folder)
+#   returns: 0 if npm publishes successfully, 1 if arguments or publishing fail
 #   requires: npm
 ############################
 
@@ -1486,6 +1649,7 @@ npm_publish(){
 #   purpose: prepends an '--extra-index-url' directive to a pip requirements file,
 #            preserving the existing content (creates a backup with _old suffix)
 #   parameters: $1 (extra index URL), $2 (path to requirements file)
+#   returns: 0 if the file is updated, 1 if required arguments or file operations fail
 ############################
 python_add_pip_index_to_requirements(){
   info "[python_add_pip_index_to_requirements|in] ($1, $2)"
@@ -1509,6 +1673,7 @@ python_add_pip_index_to_requirements(){
 #   name: python_build
 #   purpose: builds a Python package (sdist + wheel) using 'python -m build' after cleaning the dist/ directory
 #   parameters: none
+#   returns: 0 if the package builds, 1 if the build command fails
 #   requires: python3 (with build package installed), this_folder
 ############################
 
@@ -1530,6 +1695,7 @@ python_build(){
 #   name: python_pypi_publish
 #   purpose: uploads all built distributions in dist/ to PyPI using twine
 #   parameters: $1 (PyPI username, use '__token__' for token auth), $2 (PyPI password or API token)
+#   returns: 0 if upload succeeds, 1 if credentials are missing or twine fails
 #   requires: twine, this_folder
 ############################
 
@@ -1555,6 +1721,7 @@ python_pypi_publish(){
 #   name: python_twine_publish
 #   purpose: uploads built wheel(s) from dist/ to PyPI or a custom repository using twine
 #   parameters: $1 (username), $2 (password or token), $3 (custom repository URL, optional — omit for PyPI)
+#   returns: 0 if upload succeeds, 1 if credentials are missing or twine fails
 #   requires: twine, this_folder
 ############################
 
@@ -1585,6 +1752,7 @@ python_twine_publish(){
 #   name: python_code_lint
 #   purpose: auto-formats Python source code in-place: sorts imports (isort), removes unused imports (autoflake), then reformats (black)
 #   parameters: $1 (space-separated source folders, default: 'src test')
+#   returns: 0 if all formatting tools succeed, 1 if a tool reports failure
 #   requires: isort, autoflake, black
 ############################
 
@@ -1624,6 +1792,7 @@ python_code_lint()
 #            stops at the first tool that reports issues
 #   parameters: $1 (space-separated source folders for isort/autoflake/black/pylint, default: 'src test'),
 #               $2 (source folder for bandit recursive scan, default: 'src')
+#   returns: 0 if all checks pass, 1 if a check reports failure
 #   requires: isort, autoflake, black, pylint, bandit
 ############################
 
@@ -1681,6 +1850,7 @@ python_code_check()
 #   name: python_print_coverage
 #   purpose: prints a terminal coverage report with missing lines using 'coverage report -m'
 #   parameters: none
+#   returns: 0 if the report is generated, 1 if coverage fails
 #   requires: coverage
 ############################
 
@@ -1698,6 +1868,7 @@ python_print_coverage()
 #   name: python_check_coverage
 #   purpose: asserts that the total test coverage percentage meets a minimum threshold; returns with error if below
 #   parameters: $1 (minimum coverage percentage, integer, e.g. 80)
+#   returns: 0 if the report meets the threshold, 1 if the threshold is missing, coverage fails, or coverage is too low
 #   requires: coverage (with a .coverage data file already generated)
 ############################
 
@@ -1730,6 +1901,7 @@ python_check_coverage()
 #   name: python_poetry_check_coverage
 #   purpose: asserts that the total coverage percentage from 'poetry run coverage report' meets a minimum threshold; exits with error if below
 #   parameters: $1 (minimum coverage percentage, integer, e.g. 80)
+#   returns: 0 if the report meets the threshold, 1 if coverage fails or is too low
 #   requires: poetry (with coverage, and a .coverage data file already generated)
 ############################
 
@@ -1796,6 +1968,7 @@ test_coverage_check_uv()
 #   name: python_test
 #   purpose: runs pytest with verbose output, coverage for the src/ directory, and generates JUnit XML + HTML + XML coverage reports
 #   parameters: $1 (test path or file, optional — omit to run all tests)
+#   returns: 0 if tests pass, 1 if pytest fails
 #   requires: pytest, pytest-cov
 ############################
 
@@ -1813,6 +1986,7 @@ python_test()
 #   name: python_reqs
 #   purpose: installs Python dependencies from a requirements file using pip
 #   parameters: $1 (requirements file path, default: requirements.txt)
+#   returns: 0 if dependencies install, 1 if pip fails
 #   requires: pip
 ############################
 
@@ -1834,6 +2008,7 @@ python_reqs()
 #   name: python_hatch_build
 #   purpose: cleans dist/ and builds a Python package using 'hatch build'
 #   parameters: $1 (project root directory, default: this_folder)
+#   returns: 0 if the package builds, 1 if hatch fails
 #   requires: hatch
 ############################
 
@@ -1860,6 +2035,7 @@ python_hatch_build(){
 #   name: python_hatch_publish
 #   purpose: publishes the built distributions in dist/ to PyPI using 'hatch publish'
 #   parameters: $1 (project root directory, default: this_folder)
+#   returns: 0 if publishing succeeds, 1 if hatch fails
 #   requires: hatch
 ############################
 
@@ -1885,6 +2061,7 @@ python_hatch_publish(){
 #   name: build_cookiecutter_template
 #   purpose: packages a cookiecutter template directory into a cookiecutter.zip archive placed inside the template folder itself
 #   parameters: $1 (path to the cookiecutter template folder)
+#   returns: 0 if the archive is created, 1 if the path is invalid or zip/move fails
 #   requires: zip
 ############################
 
@@ -1914,6 +2091,7 @@ build_cookiecutter_template(){
 #   purpose: generates a project from a cookiecutter template with default values into a test directory,
 #            then opens the generated project in VS Code
 #   parameters: $1 (path to the cookiecutter template folder), $2 (path to the test output directory)
+#   returns: 0 if generation succeeds, 1 if required arguments or cookiecutter fail
 #   requires: pipx (with cookiecutter), code
 ############################
 
@@ -1943,6 +2121,7 @@ test_cookiecutter_template(){
 #   name: poetry_reqs
 #   purpose: installs all project + dev dependencies with poetry and sets up pre-commit hooks
 #   parameters: none
+#   returns: 0 if dependencies and hooks install, 1 if poetry or pre-commit fails
 #   requires: poetry, pre-commit, this_folder
 ############################
 
@@ -1966,6 +2145,7 @@ poetry_reqs(){
 #   name: lint_check_ruff
 #   purpose: runs ruff linter in check mode (no auto-fix) on the project
 #   parameters: none
+#   returns: 0 if ruff reports no issues, 1 if ruff fails or reports issues
 #   requires: poetry (with ruff), this_folder
 ############################
 
@@ -1990,6 +2170,7 @@ lint_check_ruff(){
 #   name: lint_check_ruff_uv
 #   purpose: runs ruff linter in check mode (no auto-fix) on the project using uv
 #   parameters: none
+#   returns: 0 if ruff reports no issues, 1 if ruff fails or reports issues
 #   requires: uv (with ruff), this_folder
 ############################
 lint_check_ruff_uv(){
@@ -2013,6 +2194,7 @@ lint_check_ruff_uv(){
 #   name: poetry_pytest_unit
 #   purpose: runs pytest unit tests via poetry with coverage reporting (term-missing, html, xml) and JUnit XML output
 #   parameters: $1 (test folder path), $2 (source folder for coverage, default: this_folder/src)
+#   returns: 0 if tests pass, 1 if arguments are missing or pytest fails
 #   requires: poetry (with pytest, pytest-cov), this_folder
 ############################
 
@@ -2048,6 +2230,7 @@ poetry_pytest_unit(){
 #   name: pytest_uv
 #   purpose: runs pytest unit tests via uv with coverage reporting (term-missing, html, xml) and JUnit XML output
 #   parameters: $1 (test directory, default: test), $2 (source directory for coverage, default: src)
+#   returns: 0 if tests pass, 1 if pytest fails
 #   requires: uv (with pytest, pytest-cov), this_folder
 ############################
 pytest_uv(){
@@ -2078,6 +2261,7 @@ pytest_uv(){
 #   name: poetry_pytest_bdd
 #   purpose: erases previous coverage data then runs pytest BDD tests via poetry with coverage reporting and JUnit XML output
 #   parameters: $1 (BDD test folder path), $2 (source folder for coverage, default: this_folder/src)
+#   returns: 0 if tests pass, 1 if the test folder is missing or pytest fails
 #   requires: poetry (with pytest, pytest-cov, pytest-bdd), this_folder
 ############################
 
@@ -2113,6 +2297,7 @@ poetry_pytest_bdd(){
 #   name: python_poetry_print_coverage
 #   purpose: prints a coverage report with missing lines and generates html + xml reports via poetry
 #   parameters: none
+#   returns: 0 if all reports are generated, nonzero if a coverage command fails
 #   requires: poetry (with coverage)
 ############################
 
@@ -2131,6 +2316,7 @@ python_poetry_print_coverage()
 #   name: test_print_coverage_uv
 #   purpose: prints a coverage report with missing lines and generates html + xml reports via uv
 #   parameters: none
+#   returns: 0 if all reports are generated, nonzero if a coverage command fails
 #   requires: uv (with coverage, and a .coverage data file already generated)
 ############################
 test_print_coverage_uv()
@@ -2148,6 +2334,7 @@ test_print_coverage_uv()
 #   name: poetry_build
 #   purpose: generates a CHANGELOG, cleans dist/ and builds the package using 'poetry build'
 #   parameters: none
+#   returns: 0 if the package builds, 1 if poetry fails
 #   requires: poetry, changelog function, this_folder
 ############################
 
@@ -2171,6 +2358,7 @@ poetry_build(){
 #   name: build_uv
 #   purpose: cleans dist/ and builds the Python package using 'uv build'
 #   parameters: none
+#   returns: 0 if the package builds, 1 if uv fails
 #   requires: uv, this_folder
 ############################
 build_uv(){
@@ -2194,6 +2382,7 @@ build_uv(){
 #   name: poetry_publish_az
 #   purpose: configures a private Azure DevOps PyPI feed in poetry and publishes the package to it
 #   parameters: $1 (Azure DevOps feed URL), $2 (poetry repository name/alias), $3 (feed username), $4 (feed password/token)
+#   returns: 0 if publishing succeeds, 1 if an argument or poetry command fails
 #   requires: poetry, this_folder
 ############################
 
@@ -2228,6 +2417,7 @@ poetry_publish_az(){
 #   name: publish_pypi_uv
 #   purpose: publishes the built package distributions to PyPI using 'uv publish' with a token
 #   parameters: $1 (PyPI API token)
+#   returns: 0 if publishing succeeds, 1 if the token is missing or uv fails
 #   requires: uv, this_folder
 ############################
 publish_pypi_uv(){
@@ -2253,6 +2443,7 @@ publish_pypi_uv(){
 #   name: poetry_add_supplemental_source_repo
 #   purpose: registers a supplemental (low-priority) private package source in the project's poetry config with authentication
 #   parameters: $1 (repository alias/name), $2 (repository URL), $3 (username), $4 (access token)
+#   returns: 0 if the source is configured, 1 if an argument or poetry command fails
 #   requires: poetry, this_folder
 ############################
 
@@ -2285,6 +2476,7 @@ poetry_add_supplemental_source_repo(){
 #   name: sca_check_safety
 #   purpose: runs a Software Composition Analysis (SCA) scan with the safety tool to detect known vulnerabilities in dependencies
 #   parameters: $1 (Safety CLI API key)
+#   returns: 0 if the scan passes, 1 if the key is missing or the scan reports failure
 #   requires: poetry (with safety), this_folder
 ############################
 
@@ -2312,6 +2504,7 @@ sca_check_safety(){
 #   name: sca_check_safety_uv
 #   purpose: runs a Software Composition Analysis (SCA) scan with the safety tool via uv to detect known vulnerabilities in dependencies; continues even if vulnerabilities are found (--continue-on-error)
 #   parameters: $1 (Safety CLI API key)
+#   returns: 0 after running the scan, 1 if the key is missing
 #   requires: uv (with safety), this_folder
 ############################
 sca_check_safety_uv(){
@@ -2339,6 +2532,7 @@ sca_check_safety_uv(){
 #   name: sast_check_bandit
 #   purpose: runs a Static Application Security Testing (SAST) scan with bandit to detect common security issues in Python source code
 #   parameters: $1 (source directory to scan recursively)
+#   returns: 0 if the scan passes, 1 if the source directory is missing or the scan reports failure
 #   requires: poetry (with bandit), this_folder
 ############################
 
@@ -2366,6 +2560,7 @@ sast_check_bandit(){
 #   name: sast_check_bandit_uv
 #   purpose: runs a Static Application Security Testing (SAST) scan with bandit via uv to detect common security issues in Python source code
 #   parameters: $1 (source directory to scan recursively)
+#   returns: 0 if the scan passes, 1 if the source directory is missing or the scan reports failure
 #   requires: uv (with bandit), this_folder
 ############################
 sast_check_bandit_uv(){
@@ -2392,6 +2587,7 @@ sast_check_bandit_uv(){
 #   name: poetry_publish_pip
 #   purpose: publishes the built package to PyPI using 'poetry publish' with explicit credentials
 #   parameters: $1 (PyPI username, use '__token__' for token auth), $2 (PyPI password or API token)
+#   returns: 0 if publishing succeeds, 1 if credentials are missing or poetry fails
 #   requires: poetry, this_folder
 ############################
 
@@ -2420,6 +2616,7 @@ poetry_publish_pip(){
 #   name: pyproj_report_header
 #   purpose: generates a markdown test report header with package name, version, timestamp, repository, branch, and commit ID read from pyproject.toml
 #   parameters: $1 (output markdown filename), $2 (repository name), $3 (branch name), $4 (commit ID)
+#   returns: 0 after writing the report header, 1 if a required argument is missing
 #   requires: uv (with tomllib), this_folder
 ############################
 pyproj_report_header(){
@@ -2459,6 +2656,7 @@ pyproj_report_header(){
 #   name: generate_pr_approvals_pdf
 #   purpose: generates a PDF report of PR approvals for a given repository branch using tgedr_pycommons
 #   parameters: $1 (repository name), $2 (branch name), $3 (output PDF file path)
+#   returns: the exit status of the uv command, or 1 if a required argument is missing
 #   requires: uv (with tgedr_pycommons)
 ############################
 generate_pr_approvals_pdf() {
@@ -2477,6 +2675,7 @@ generate_pr_approvals_pdf() {
 #   name: generate_quality_report_pdf
 #   purpose: converts a markdown quality report to a PDF file using tgedr_pycommons
 #   parameters: $1 (input markdown file path), $2 (output PDF file path)
+#   returns: the exit status of the uv command, or 1 if a required argument is missing
 #   requires: uv (with tgedr_pycommons)
 ############################
 generate_quality_report_pdf() {
@@ -2498,6 +2697,7 @@ generate_quality_report_pdf() {
 #   name: terraform_autodeploy
 #   purpose: runs a full Terraform deployment (init → plan → apply --auto-approve) in the given folder
 #   parameters: $1 (path to the folder containing Terraform configuration files)
+#   returns: 0 if init, plan, and apply succeed, 1 if a required command or Terraform step fails
 #   requires: terraform
 ############################
 terraform_autodeploy(){
@@ -2526,6 +2726,7 @@ terraform_autodeploy(){
 #   name: terraform_autodestroy
 #   purpose: runs 'terraform destroy --auto-approve' in the given folder to tear down all managed infrastructure
 #   parameters: $1 (path to the folder containing Terraform configuration files)
+#   returns: 0 if destroy succeeds, 1 if the folder, required command, or Terraform step fails
 #   requires: terraform
 ############################
 

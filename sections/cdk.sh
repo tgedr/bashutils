@@ -7,6 +7,7 @@
 #   purpose: globally installs all npm packages required for AWS CDK TypeScript development
 #   parameters: $1 (typescript version), $2 (aws-cdk version), $3 (ts-node version),
 #               $4 (@aws-cdk/integ-runner version), $5 (@aws-cdk/integ-tests-alpha version), $6 (jest version)
+#   returns: 0 if packages install, 1 if a required version is missing or npm fails
 #   requires: npm
 ############################
 cdk_global_reqs(){
@@ -37,6 +38,7 @@ cdk_global_reqs(){
 #   name: cdk_scaffolding
 #   purpose: initialises a new AWS CDK TypeScript app in the given directory using 'cdk init app'
 #   parameters: $1 (path to the target infrastructure directory)
+#   returns: 0 if the app is initialized, 1 if the directory is missing or cdk fails
 #   requires: cdk
 ############################
 
@@ -63,6 +65,7 @@ cdk_scaffolding(){
 #   parameters: $1 (typescript version), $2 (aws-cdk version), $3 (ts-node version),
 #               $4 (@aws-cdk/integ-runner version), $5 (@aws-cdk/integ-tests-alpha version),
 #               $6 (jest version), $7 (path to infrastructure directory)
+#   returns: 0 if dependencies install and scaffolding succeeds, 1 if either step fails
 #   requires: npm, cdk
 ############################
 
@@ -101,6 +104,7 @@ cdk_infra_bootstrap(){
 #   parameters: $1 (operation: on | off | bootstrap),
 #               $2 (infrastructure folder, default: infrastructure),
 #               $3 (stacks selector, default: --all)
+#   returns: 0 if the requested operation succeeds, 1 if a CDK command fails
 #   requires: cdk
 ############################
 
@@ -155,6 +159,7 @@ cdk_infra()
 #   name: cdk_setup
 #   purpose: runs 'npm install' in the CDK infrastructure directory to install project dependencies
 #   parameters: $1 (infrastructure folder path, default: infrastructure)
+#   returns: 0 if dependencies install, 1 if npm fails
 #   requires: npm
 ############################
 

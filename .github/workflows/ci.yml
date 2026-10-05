@@ -14,15 +14,14 @@ jobs:
       - name: install bats-core
         run: |
           ./helper.sh reqs
+      - name: bump up version
+        run: ./helper.sh bump_up_version
+      - name: build bashutils
+        run: ./helper.sh build
       - name: bash syntax check
-        run: |
-          bash -n bashutils-template.sh && bash -n bashutils
+        run: bash -n bashutils-template.sh && bash -n bashutils
       - name: run bats tests
         run: ./helper.sh test
-      - name: Verify bashutils is up to date
-        run: |
-          ./helper.sh build
-          git diff --exit-code -- bashutils
       - name: Create release artifacts
         run: ./helper.sh create_release_artifacts
       - name: Create GitHub release
@@ -30,11 +29,11 @@ jobs:
         env: 
           # RELEASE_DRAFT: "true"
           GH_TOKEN: ${{ github.token }}
-      - name: 'commit and push updated version file'
+      - name: 'commit and push updated files'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .version
-          git diff --cached --quiet || git commit -m "auto: update .version [skip ci]"
+          git add .version bashutils bashutils.checksum
+          git diff --cached --quiet || git commit -m "auto: update files [skip ci]"
           git push
 

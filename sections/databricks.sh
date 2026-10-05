@@ -7,6 +7,7 @@
 #   purpose: authenticates interactively with Azure, retrieves a Databricks access token,
 #            and persists DATABRICKS_HOST and DATABRICKS_TOKEN via add_entry_to_variables/add_entry_to_secrets
 #   parameters: $1 (Databricks workspace URL, e.g. https://<workspace>.azuredatabricks.net), $2 (Azure subscription ID)
+#   returns: 0 after storing the workspace host and access token, 1 if a required argument is missing
 #   requires: az, add_entry_to_variables, add_entry_to_secrets
 ############################
 databricks_set_cli_access()
@@ -29,6 +30,7 @@ databricks_set_cli_access()
 #   name: databricks_bundle_deploy
 #   purpose: validates and deploys a Databricks Asset Bundle to the specified target environment
 #   parameters: $1 (path to the bundle folder containing databricks.yml), $2 (deployment target: local | main, default: local)
+#   returns: 0 if validation and deployment succeed, 1 if arguments are invalid or a command fails
 #   requires: databricks
 ############################
 
@@ -59,6 +61,7 @@ databricks_bundle_deploy(){
 #   name: databricks_bundle_destroy
 #   purpose: destroys all resources managed by a Databricks Asset Bundle in the specified target environment
 #   parameters: $1 (path to the bundle folder containing databricks.yml), $2 (deployment target: local | main, default: local)
+#   returns: 0 if destruction succeeds, 1 if arguments are invalid or databricks fails
 #   requires: databricks
 ############################
 
@@ -88,6 +91,7 @@ databricks_bundle_destroy(){
 #   name: databricks_delete_secret
 #   purpose: removes a secret key from a Databricks secret scope
 #   parameters: $1 (secret key name), $2 (secret scope name)
+#   returns: 0 if the secret is deleted, 1 if arguments are missing or databricks fails
 #   requires: databricks
 ############################
 
@@ -110,6 +114,7 @@ databricks_delete_secret(){
 #   name: databricks_set_secret
 #   purpose: creates a secret in a Databricks secret scope if it does not already exist; warns if already present
 #   parameters: $1 (secret key name), $2 (secret scope name), $3 (secret string value)
+#   returns: 0 if the secret exists or is created, 1 if arguments are missing or creation fails
 #   requires: databricks
 ############################
 
@@ -141,6 +146,7 @@ databricks_set_secret(){
 #   purpose: downloads a universal package from an Azure DevOps artifacts feed using the Azure CLI
 #   parameters: $1 (Azure DevOps organization URL), $2 (feed name), $3 (package name),
 #               $4 (package version), $5 (local download path, default: current directory)
+#   returns: 0 if the package downloads, 1 if arguments are missing or az fails
 #   requires: az (with azure-devops extension)
 ############################
 

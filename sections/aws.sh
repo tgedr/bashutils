@@ -30,6 +30,7 @@ aws_find_kms_alias(){
 #   name: aws_get_cloudfront_cidr
 #   purpose: retrieves the CIDR entries from the CloudFront origin-facing managed prefix list and writes them as JSON to a file
 #   parameters: $1 (output file path)
+#   returns: 0 if the JSON file is written, 1 if the output argument is missing or writing fails
 #   requires: aws, jq
 ############################
 
@@ -53,6 +54,7 @@ aws_get_cloudfront_cidr(){
 #   purpose: configures a named AWS CLI profile with static credentials and region using 'aws configure'
 #   parameters: $1 (profile name), $2 (AWS access key ID), $3 (AWS secret access key),
 #               $4 (AWS region, e.g. eu-west-1), $5 (output format, default: json)
+#   returns: 0 if the profile is configured, 1 if required arguments or an AWS CLI command fails
 #   requires: aws
 ############################
 

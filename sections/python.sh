@@ -7,6 +7,7 @@
 #   purpose: prepends an '--extra-index-url' directive to a pip requirements file,
 #            preserving the existing content (creates a backup with _old suffix)
 #   parameters: $1 (extra index URL), $2 (path to requirements file)
+#   returns: 0 if the file is updated, 1 if required arguments or file operations fail
 ############################
 python_add_pip_index_to_requirements(){
   info "[python_add_pip_index_to_requirements|in] ($1, $2)"
@@ -30,6 +31,7 @@ python_add_pip_index_to_requirements(){
 #   name: python_build
 #   purpose: builds a Python package (sdist + wheel) using 'python -m build' after cleaning the dist/ directory
 #   parameters: none
+#   returns: 0 if the package builds, 1 if the build command fails
 #   requires: python3 (with build package installed), this_folder
 ############################
 
@@ -51,6 +53,7 @@ python_build(){
 #   name: python_pypi_publish
 #   purpose: uploads all built distributions in dist/ to PyPI using twine
 #   parameters: $1 (PyPI username, use '__token__' for token auth), $2 (PyPI password or API token)
+#   returns: 0 if upload succeeds, 1 if credentials are missing or twine fails
 #   requires: twine, this_folder
 ############################
 
@@ -76,6 +79,7 @@ python_pypi_publish(){
 #   name: python_twine_publish
 #   purpose: uploads built wheel(s) from dist/ to PyPI or a custom repository using twine
 #   parameters: $1 (username), $2 (password or token), $3 (custom repository URL, optional — omit for PyPI)
+#   returns: 0 if upload succeeds, 1 if credentials are missing or twine fails
 #   requires: twine, this_folder
 ############################
 
@@ -106,6 +110,7 @@ python_twine_publish(){
 #   name: python_code_lint
 #   purpose: auto-formats Python source code in-place: sorts imports (isort), removes unused imports (autoflake), then reformats (black)
 #   parameters: $1 (space-separated source folders, default: 'src test')
+#   returns: 0 if all formatting tools succeed, 1 if a tool reports failure
 #   requires: isort, autoflake, black
 ############################
 
@@ -145,6 +150,7 @@ python_code_lint()
 #            stops at the first tool that reports issues
 #   parameters: $1 (space-separated source folders for isort/autoflake/black/pylint, default: 'src test'),
 #               $2 (source folder for bandit recursive scan, default: 'src')
+#   returns: 0 if all checks pass, 1 if a check reports failure
 #   requires: isort, autoflake, black, pylint, bandit
 ############################
 
@@ -202,6 +208,7 @@ python_code_check()
 #   name: python_print_coverage
 #   purpose: prints a terminal coverage report with missing lines using 'coverage report -m'
 #   parameters: none
+#   returns: 0 if the report is generated, 1 if coverage fails
 #   requires: coverage
 ############################
 
@@ -219,6 +226,7 @@ python_print_coverage()
 #   name: python_check_coverage
 #   purpose: asserts that the total test coverage percentage meets a minimum threshold; returns with error if below
 #   parameters: $1 (minimum coverage percentage, integer, e.g. 80)
+#   returns: 0 if the report meets the threshold, 1 if the threshold is missing, coverage fails, or coverage is too low
 #   requires: coverage (with a .coverage data file already generated)
 ############################
 
@@ -251,6 +259,7 @@ python_check_coverage()
 #   name: python_poetry_check_coverage
 #   purpose: asserts that the total coverage percentage from 'poetry run coverage report' meets a minimum threshold; exits with error if below
 #   parameters: $1 (minimum coverage percentage, integer, e.g. 80)
+#   returns: 0 if the report meets the threshold, 1 if coverage fails or is too low
 #   requires: poetry (with coverage, and a .coverage data file already generated)
 ############################
 
@@ -317,6 +326,7 @@ test_coverage_check_uv()
 #   name: python_test
 #   purpose: runs pytest with verbose output, coverage for the src/ directory, and generates JUnit XML + HTML + XML coverage reports
 #   parameters: $1 (test path or file, optional — omit to run all tests)
+#   returns: 0 if tests pass, 1 if pytest fails
 #   requires: pytest, pytest-cov
 ############################
 
@@ -334,6 +344,7 @@ python_test()
 #   name: python_reqs
 #   purpose: installs Python dependencies from a requirements file using pip
 #   parameters: $1 (requirements file path, default: requirements.txt)
+#   returns: 0 if dependencies install, 1 if pip fails
 #   requires: pip
 ############################
 
@@ -355,6 +366,7 @@ python_reqs()
 #   name: python_hatch_build
 #   purpose: cleans dist/ and builds a Python package using 'hatch build'
 #   parameters: $1 (project root directory, default: this_folder)
+#   returns: 0 if the package builds, 1 if hatch fails
 #   requires: hatch
 ############################
 
@@ -381,6 +393,7 @@ python_hatch_build(){
 #   name: python_hatch_publish
 #   purpose: publishes the built distributions in dist/ to PyPI using 'hatch publish'
 #   parameters: $1 (project root directory, default: this_folder)
+#   returns: 0 if publishing succeeds, 1 if hatch fails
 #   requires: hatch
 ############################
 
@@ -406,6 +419,7 @@ python_hatch_publish(){
 #   name: build_cookiecutter_template
 #   purpose: packages a cookiecutter template directory into a cookiecutter.zip archive placed inside the template folder itself
 #   parameters: $1 (path to the cookiecutter template folder)
+#   returns: 0 if the archive is created, 1 if the path is invalid or zip/move fails
 #   requires: zip
 ############################
 
@@ -435,6 +449,7 @@ build_cookiecutter_template(){
 #   purpose: generates a project from a cookiecutter template with default values into a test directory,
 #            then opens the generated project in VS Code
 #   parameters: $1 (path to the cookiecutter template folder), $2 (path to the test output directory)
+#   returns: 0 if generation succeeds, 1 if required arguments or cookiecutter fail
 #   requires: pipx (with cookiecutter), code
 ############################
 
@@ -464,6 +479,7 @@ test_cookiecutter_template(){
 #   name: poetry_reqs
 #   purpose: installs all project + dev dependencies with poetry and sets up pre-commit hooks
 #   parameters: none
+#   returns: 0 if dependencies and hooks install, 1 if poetry or pre-commit fails
 #   requires: poetry, pre-commit, this_folder
 ############################
 
@@ -487,6 +503,7 @@ poetry_reqs(){
 #   name: lint_check_ruff
 #   purpose: runs ruff linter in check mode (no auto-fix) on the project
 #   parameters: none
+#   returns: 0 if ruff reports no issues, 1 if ruff fails or reports issues
 #   requires: poetry (with ruff), this_folder
 ############################
 
@@ -511,6 +528,7 @@ lint_check_ruff(){
 #   name: lint_check_ruff_uv
 #   purpose: runs ruff linter in check mode (no auto-fix) on the project using uv
 #   parameters: none
+#   returns: 0 if ruff reports no issues, 1 if ruff fails or reports issues
 #   requires: uv (with ruff), this_folder
 ############################
 lint_check_ruff_uv(){
@@ -534,6 +552,7 @@ lint_check_ruff_uv(){
 #   name: poetry_pytest_unit
 #   purpose: runs pytest unit tests via poetry with coverage reporting (term-missing, html, xml) and JUnit XML output
 #   parameters: $1 (test folder path), $2 (source folder for coverage, default: this_folder/src)
+#   returns: 0 if tests pass, 1 if arguments are missing or pytest fails
 #   requires: poetry (with pytest, pytest-cov), this_folder
 ############################
 
@@ -569,6 +588,7 @@ poetry_pytest_unit(){
 #   name: pytest_uv
 #   purpose: runs pytest unit tests via uv with coverage reporting (term-missing, html, xml) and JUnit XML output
 #   parameters: $1 (test directory, default: test), $2 (source directory for coverage, default: src)
+#   returns: 0 if tests pass, 1 if pytest fails
 #   requires: uv (with pytest, pytest-cov), this_folder
 ############################
 pytest_uv(){
@@ -599,6 +619,7 @@ pytest_uv(){
 #   name: poetry_pytest_bdd
 #   purpose: erases previous coverage data then runs pytest BDD tests via poetry with coverage reporting and JUnit XML output
 #   parameters: $1 (BDD test folder path), $2 (source folder for coverage, default: this_folder/src)
+#   returns: 0 if tests pass, 1 if the test folder is missing or pytest fails
 #   requires: poetry (with pytest, pytest-cov, pytest-bdd), this_folder
 ############################
 
@@ -634,6 +655,7 @@ poetry_pytest_bdd(){
 #   name: python_poetry_print_coverage
 #   purpose: prints a coverage report with missing lines and generates html + xml reports via poetry
 #   parameters: none
+#   returns: 0 if all reports are generated, nonzero if a coverage command fails
 #   requires: poetry (with coverage)
 ############################
 
@@ -652,6 +674,7 @@ python_poetry_print_coverage()
 #   name: test_print_coverage_uv
 #   purpose: prints a coverage report with missing lines and generates html + xml reports via uv
 #   parameters: none
+#   returns: 0 if all reports are generated, nonzero if a coverage command fails
 #   requires: uv (with coverage, and a .coverage data file already generated)
 ############################
 test_print_coverage_uv()
@@ -669,6 +692,7 @@ test_print_coverage_uv()
 #   name: poetry_build
 #   purpose: generates a CHANGELOG, cleans dist/ and builds the package using 'poetry build'
 #   parameters: none
+#   returns: 0 if the package builds, 1 if poetry fails
 #   requires: poetry, changelog function, this_folder
 ############################
 
@@ -692,6 +716,7 @@ poetry_build(){
 #   name: build_uv
 #   purpose: cleans dist/ and builds the Python package using 'uv build'
 #   parameters: none
+#   returns: 0 if the package builds, 1 if uv fails
 #   requires: uv, this_folder
 ############################
 build_uv(){
@@ -715,6 +740,7 @@ build_uv(){
 #   name: poetry_publish_az
 #   purpose: configures a private Azure DevOps PyPI feed in poetry and publishes the package to it
 #   parameters: $1 (Azure DevOps feed URL), $2 (poetry repository name/alias), $3 (feed username), $4 (feed password/token)
+#   returns: 0 if publishing succeeds, 1 if an argument or poetry command fails
 #   requires: poetry, this_folder
 ############################
 
@@ -749,6 +775,7 @@ poetry_publish_az(){
 #   name: publish_pypi_uv
 #   purpose: publishes the built package distributions to PyPI using 'uv publish' with a token
 #   parameters: $1 (PyPI API token)
+#   returns: 0 if publishing succeeds, 1 if the token is missing or uv fails
 #   requires: uv, this_folder
 ############################
 publish_pypi_uv(){
@@ -774,6 +801,7 @@ publish_pypi_uv(){
 #   name: poetry_add_supplemental_source_repo
 #   purpose: registers a supplemental (low-priority) private package source in the project's poetry config with authentication
 #   parameters: $1 (repository alias/name), $2 (repository URL), $3 (username), $4 (access token)
+#   returns: 0 if the source is configured, 1 if an argument or poetry command fails
 #   requires: poetry, this_folder
 ############################
 
@@ -806,6 +834,7 @@ poetry_add_supplemental_source_repo(){
 #   name: sca_check_safety
 #   purpose: runs a Software Composition Analysis (SCA) scan with the safety tool to detect known vulnerabilities in dependencies
 #   parameters: $1 (Safety CLI API key)
+#   returns: 0 if the scan passes, 1 if the key is missing or the scan reports failure
 #   requires: poetry (with safety), this_folder
 ############################
 
@@ -833,6 +862,7 @@ sca_check_safety(){
 #   name: sca_check_safety_uv
 #   purpose: runs a Software Composition Analysis (SCA) scan with the safety tool via uv to detect known vulnerabilities in dependencies; continues even if vulnerabilities are found (--continue-on-error)
 #   parameters: $1 (Safety CLI API key)
+#   returns: 0 after running the scan, 1 if the key is missing
 #   requires: uv (with safety), this_folder
 ############################
 sca_check_safety_uv(){
@@ -860,6 +890,7 @@ sca_check_safety_uv(){
 #   name: sast_check_bandit
 #   purpose: runs a Static Application Security Testing (SAST) scan with bandit to detect common security issues in Python source code
 #   parameters: $1 (source directory to scan recursively)
+#   returns: 0 if the scan passes, 1 if the source directory is missing or the scan reports failure
 #   requires: poetry (with bandit), this_folder
 ############################
 
@@ -887,6 +918,7 @@ sast_check_bandit(){
 #   name: sast_check_bandit_uv
 #   purpose: runs a Static Application Security Testing (SAST) scan with bandit via uv to detect common security issues in Python source code
 #   parameters: $1 (source directory to scan recursively)
+#   returns: 0 if the scan passes, 1 if the source directory is missing or the scan reports failure
 #   requires: uv (with bandit), this_folder
 ############################
 sast_check_bandit_uv(){
@@ -913,6 +945,7 @@ sast_check_bandit_uv(){
 #   name: poetry_publish_pip
 #   purpose: publishes the built package to PyPI using 'poetry publish' with explicit credentials
 #   parameters: $1 (PyPI username, use '__token__' for token auth), $2 (PyPI password or API token)
+#   returns: 0 if publishing succeeds, 1 if credentials are missing or poetry fails
 #   requires: poetry, this_folder
 ############################
 
@@ -941,6 +974,7 @@ poetry_publish_pip(){
 #   name: pyproj_report_header
 #   purpose: generates a markdown test report header with package name, version, timestamp, repository, branch, and commit ID read from pyproject.toml
 #   parameters: $1 (output markdown filename), $2 (repository name), $3 (branch name), $4 (commit ID)
+#   returns: 0 after writing the report header, 1 if a required argument is missing
 #   requires: uv (with tomllib), this_folder
 ############################
 pyproj_report_header(){
@@ -980,6 +1014,7 @@ pyproj_report_header(){
 #   name: generate_pr_approvals_pdf
 #   purpose: generates a PDF report of PR approvals for a given repository branch using tgedr_pycommons
 #   parameters: $1 (repository name), $2 (branch name), $3 (output PDF file path)
+#   returns: the exit status of the uv command, or 1 if a required argument is missing
 #   requires: uv (with tgedr_pycommons)
 ############################
 generate_pr_approvals_pdf() {
@@ -998,6 +1033,7 @@ generate_pr_approvals_pdf() {
 #   name: generate_quality_report_pdf
 #   purpose: converts a markdown quality report to a PDF file using tgedr_pycommons
 #   parameters: $1 (input markdown file path), $2 (output PDF file path)
+#   returns: the exit status of the uv command, or 1 if a required argument is missing
 #   requires: uv (with tgedr_pycommons)
 ############################
 generate_quality_report_pdf() {

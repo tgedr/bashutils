@@ -51,6 +51,7 @@ verify_env(){
 #   name: package
 #   purpose: creates a bzip2-compressed tar archive from the project root
 #   parameters: none
+#   returns: 0 if the archive is created, 1 if tar fails
 #   requires: TAR_NAME (output archive path), INCLUDE_FILE (file/folder to archive), this_folder (project root)
 ############################
 package(){
@@ -71,6 +72,7 @@ package(){
 #            removes any existing line for the variable before appending the new value;
 #            if $3 is empty the variable entry is deleted without replacement
 #   parameters: $1 (file name, relative to this_folder), $2 (variable name), $3 (variable value, optional)
+#   returns: 0 after updating the file, 1 if required arguments are missing
 #   requires: this_folder (project root)
 ############################
 add_entry_to_file()
@@ -104,6 +106,7 @@ add_entry_to_file()
 #   name: add_entry_to_variables
 #   purpose: upserts an environment variable entry in the shared variables file (FILE_VARIABLES)
 #   parameters: $1 (variable name), $2 (variable value, optional — omit to delete the entry)
+#   returns: 0 after updating the file, 1 if the variable name is missing
 #   requires: FILE_VARIABLES
 ############################
 add_entry_to_variables()
@@ -121,6 +124,7 @@ add_entry_to_variables()
 #   name: add_entry_to_local_variables
 #   purpose: upserts an environment variable entry in the local variables file (FILE_LOCAL_VARIABLES)
 #   parameters: $1 (variable name), $2 (variable value, optional — omit to delete the entry)
+#   returns: 0 after updating the file, 1 if the variable name is missing
 #   requires: FILE_LOCAL_VARIABLES
 ############################
 add_entry_to_local_variables()
@@ -138,6 +142,7 @@ add_entry_to_local_variables()
 #   name: add_entry_to_secrets
 #   purpose: upserts an environment variable entry in the secrets file (FILE_SECRETS)
 #   parameters: $1 (variable name), $2 (secret value, optional — omit to delete the entry)
+#   returns: 0 after updating the file, 1 if the variable name is missing
 #   requires: FILE_SECRETS
 ############################
 add_entry_to_secrets()
@@ -178,6 +183,7 @@ git_tag_and_push()
 #   name: git_tag_and_push_auto_uv
 #   purpose: reads the project version from pyproject.toml via uv, then creates an annotated git tag on the latest commit and pushes all tags to remote
 #   parameters: none
+#   returns: 0 if the tag is created and pushed, 1 if tagging or pushing fails
 #   requires: uv (with tomllib), git, this_folder
 ############################
 git_tag_and_push_auto_uv()
@@ -200,6 +206,8 @@ git_tag_and_push_auto_uv()
 #   name: get_latest_tag
 #   purpose: retrieves the latest git tag from the repository
 #   parameters: none
+#   returns: 0 and prints the latest tag, 1 if no tag is available
+#   requires: git
 ############################
 get_latest_tag() {
   info "[get_latest_tag|in]" >&2
@@ -220,6 +228,7 @@ get_latest_tag() {
 #   name: changelog
 #   purpose: generates a CHANGELOG file from git log (format: hash, date, refs, subject)
 #   parameters: $1 (output filename, default: CHANGELOG)
+#   returns: 0 if the changelog is written, 1 if git log fails
 #   requires: this_folder (project root)
 ############################
 
@@ -251,6 +260,7 @@ changelog(){
 #               $4 (path segment replacement — target)
 #               $5 (import prefix to replace — origin, e.g. 'old_pkg.')
 #               $6 (import prefix replacement — target, e.g. 'new_pkg.')
+#   returns: 0 when processing completes, 1 if a required argument is missing
 #   requires: this_folder (project root)
 ############################
 
@@ -339,6 +349,7 @@ add_pypi_config(){
 #   purpose: ensures the 'uv' Python package manager is installed (installs via the official install script if absent);
 #            then runs 'uv init' if no pyproject.toml exists, or 'uv sync' otherwise
 #   parameters: none
+#   returns: 0 if uv initialization or synchronization succeeds, 1 if installation or setup fails
 #   requires: this_folder (project root)
 ############################
 
@@ -372,6 +383,7 @@ assert_uv_config(){
 #   name: print_uuid
 #   purpose: generates and prints a new UUID using uuidgen
 #   parameters: none
+#   returns: 0 after printing the UUID
 #   requires: uuidgen
 ############################
 
@@ -388,6 +400,7 @@ print_uuid(){
 #   name: collect_dot_git
 #   purpose: archives the .git directory of the project into a compressed tar archive
 #   parameters: $1 (output archive filename, default: git.tar.gz)
+#   returns: 0 if the archive is created, 1 if tar fails
 #   requires: tar, this_folder
 ############################
 collect_dot_git(){
@@ -409,6 +422,7 @@ collect_dot_git(){
 #   name: create_release_documentation
 #   purpose: assembles release documentation artifacts (git archive, PR approval PDF, QA PDF) into a single directory and compresses it into a tar archive
 #   parameters: $1 (git archive tar file path), $2 (PR approvals PDF file path), $3 (QA report PDF file path), $4 (output target directory)
+#   returns: 0 if the release archive is created, 1 if arguments are missing or tar fails
 #   requires: tar, this_folder
 ############################
 create_release_documentation(){
@@ -475,6 +489,7 @@ function_report_wrapper(){
 #   name: generate_pr_approvals_md
 #   purpose: generates a markdown report of PR approvals for a given repository branch using tgedr_pycommons
 #   parameters: $1 (repository name), $2 (branch name), $3 (output markdown file path)
+#   returns: the exit status of the uv command, or 1 if a required argument is missing
 #   requires: uv (with tgedr_pycommons)
 ############################
 generate_pr_approvals_md() {
@@ -493,6 +508,7 @@ generate_pr_approvals_md() {
 #   name: generate_pdf_from_md
 #   purpose: converts a markdown file to a PDF using tgedr_pycommons
 #   parameters: $1 (input markdown file path), $2 (output PDF file path)
+#   returns: the exit status of the uv command, or 1 if a required argument is missing
 #   requires: uv (with tgedr_pycommons)
 ############################
 generate_pdf_from_md() {
@@ -509,6 +525,7 @@ generate_pdf_from_md() {
 #   name: create_github_release
 #   purpose: creates a GitHub release for a given version tag, uploading all files from dist/; supports draft mode via RELEASE_DRAFT env var
 #   parameters: $1 (version tag string)
+#   returns: 0 if the release is created, 1 if the tag is missing, no assets exist, or gh fails
 #   requires: gh CLI, RELEASE_DRAFT (env var, optional)
 ############################
 create_github_release(){
@@ -542,6 +559,7 @@ create_github_release(){
 #   name: download_github_release_files
 #   purpose: downloads all release assets from a GitHub release by version tag using the assets API (avoids proxy-blocked redirects); supports optional token authentication
 #   parameters: $1 (repository in owner/repo format), $2 (version tag), $3 (target download directory), $4 (optional GitHub API token)
+#   returns: 0 if all assets download, 1 if arguments, metadata lookup, or a download fails
 #   requires: curl, python3, this_folder
 ############################
 download_github_release_files(){
