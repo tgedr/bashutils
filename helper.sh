@@ -338,6 +338,9 @@ case "$1" in
   create_release_artifacts)
     create_release_artifacts
     ;;
+  create_github_release)
+    create_github_release
+    ;;
   *)
     usage
     ;;
