@@ -269,8 +269,8 @@ create_release_artifacts(){
 
   rm -rf "$dist_dir"
   mkdir -p "$dist_dir"
-  mv "$out_file" "$dist_dir/" || { err "[create_release_artifacts] failed to move $INCLUDE_FILE to $dist_dir"; exit 1; }
-  mv "${out_file}.checksum" "$dist_dir/" || { err "[create_release_artifacts] failed to move ${out_file}.checksum to $dist_dir"; exit 1; }
+  cp "$out_file" "$dist_dir/" || { err "[create_release_artifacts] failed to move $INCLUDE_FILE to $dist_dir"; exit 1; }
+  cp "${out_file}.checksum" "$dist_dir/" || { err "[create_release_artifacts] failed to move ${out_file}.checksum to $dist_dir"; exit 1; }
 
   read -r value < "$version_file"
   value=$((10#$value + 1))
@@ -278,7 +278,7 @@ create_release_artifacts(){
   printf '%s\n' "$value" > "$version_file"
   version="$value"
 
-  mv "$version_file" "$dist_dir/" || { err "[create_release_artifacts] failed to move $version_file to $dist_dir"; exit 1; }
+  cp "$version_file" "$dist_dir/" || { err "[create_release_artifacts] failed to move $version_file to $dist_dir"; exit 1; }
   info "[create_release_artifacts|out] => 0"
 }
 
