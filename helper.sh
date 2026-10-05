@@ -268,6 +268,7 @@ create_release_artifacts(){
   local version_file="$this_folder/.version"
 
   rm -rf "$dist_dir"
+  mkdir -p "$dist_dir"
   mv "$out_file" "$dist_dir/" || { err "[create_release_artifacts] failed to move $INCLUDE_FILE to $dist_dir"; exit 1; }
   mv "${out_file}.checksum" "$dist_dir/" || { err "[create_release_artifacts] failed to move ${out_file}.checksum to $dist_dir"; exit 1; }
 
