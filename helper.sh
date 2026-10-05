@@ -288,14 +288,25 @@ create_github_release(){
 
   local dist_dir="$this_folder/dist"
   local version_file="$this_folder/.version"
+  local -a release_assets=()
+  local asset
   read -r version < "$version_file"
+
+  for asset in "$dist_dir"/.[!.]* "$dist_dir"/*; do
+    [ -f "$asset" ] && release_assets+=("$asset")
+  done
+
+  if [ "${#release_assets[@]}" -eq 0 ]; then
+    err "[create_github_release] no release assets found in $dist_dir"
+    return 1
+  fi
 
   local is_draft="false"
   if [ "$RELEASE_DRAFT" = "true" ]; then
     is_draft="true"
   fi
   
-  gh release create "$version" "$dist_dir"/* --title "Release $version" --draft="$is_draft" --notes "check release content for more details"
+  gh release create "$version" "${release_assets[@]}" --title "Release $version" --draft="$is_draft" --notes "check release content for more details"
   [ "$?" -ne "0" ] && err "[create_github_release] failed to create release" && return 1
   
   info "[create_github_release|out]"
@@ -315,7 +326,7 @@ usage() {
     options:
       - reqs                        installs required tools and dependencies
       - test                        runs tests
-      - build_bashutils             rebuild .bashutils by concatenating all files in sections/
+      - build                       rebuild .bashutils by concatenating all files in sections/
       - create_release_artifacts    create release artifacts in the dist directory
 EOM
   exit 1
@@ -331,7 +342,7 @@ case "$1" in
   test)
     test
     ;;
-  build_bashutils)
+  build)
     build_bashutils
     ;;
   download_bashutils_if_newer)

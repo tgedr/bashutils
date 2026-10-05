@@ -12,7 +12,7 @@ setup() {
   : > "$COMMAND_LOG"
   : > "$ZIP_ARGS_LOG"
 
-  for command_name in aws az npm jest cdk databricks terraform; do
+  for command_name in aws az npm jest cdk databricks terraform gh; do
     printf '%s\n' \
       '#!/usr/bin/env bash' \
       'printf "%s\n" "$0 $*" >> "$COMMAND_LOG"' \
@@ -232,4 +232,45 @@ load_section() {
   grep -F 'terraform init' "$COMMAND_LOG"
   [[ "$(cat "$COMMAND_LOG")" != *"terraform plan"* ]]
   [[ "$(cat "$COMMAND_LOG")" != *"terraform apply"* ]]
+}
+
+@test "GitHub release uploads hidden assets and rejects an empty dist directory" {
+  local release_root="$TEST_DIR/release"
+  local release_dist="$release_root/dist"
+  mkdir -p "$release_dist"
+  cp "$ROOT_DIR/helper.sh" "$release_root/helper.sh"
+  printf '14\n' > "$release_root/.version"
+  touch "$release_dist/.bashutils" "$release_dist/.bashutils.checksum" "$release_dist/.version"
+
+  run env RELEASE_DRAFT=true bash "$release_root/helper.sh" create_github_release
+  [ "$status" -eq 0 ]
+  grep -F "$release_dist/.bashutils" "$COMMAND_LOG"
+  grep -F "$release_dist/.bashutils.checksum" "$COMMAND_LOG"
+  grep -F "$release_dist/.version" "$COMMAND_LOG"
+
+  : > "$COMMAND_LOG"
+  load_section bash
+  cd "$release_root"
+  create_github_release 14 >/dev/null
+  [ "$?" -eq 0 ]
+  cd "$ORIGINAL_PWD"
+  grep -F 'dist/.bashutils' "$COMMAND_LOG"
+  grep -F 'dist/.bashutils.checksum' "$COMMAND_LOG"
+  grep -F 'dist/.version' "$COMMAND_LOG"
+
+  : > "$COMMAND_LOG"
+  rm -f "$release_dist/.bashutils" "$release_dist/.bashutils.checksum" "$release_dist/.version"
+  run env RELEASE_DRAFT=true bash "$release_root/helper.sh" create_github_release
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no release assets found"* ]]
+  [ ! -s "$COMMAND_LOG" ]
+
+  cd "$release_root"
+  if create_github_release 14 >/dev/null 2>&1; then
+    return 1
+  else
+    [ "$?" -eq 1 ]
+  fi
+  cd "$ORIGINAL_PWD"
+  [ ! -s "$COMMAND_LOG" ]
 }

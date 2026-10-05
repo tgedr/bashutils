@@ -959,12 +959,23 @@ create_github_release(){
 
   [ -z "$1" ] && err "[create_github_release] missing argument VERSION" && return 1
   local VERSION="$1"
+  local dist_dir="dist"
+  local -a release_assets=()
+  local asset
+  for asset in "$dist_dir"/.[!.]* "$dist_dir"/*; do
+    [ -f "$asset" ] && release_assets+=("$asset")
+  done
+  if [ "${#release_assets[@]}" -eq 0 ]; then
+    err "[create_github_release] no release assets found in $dist_dir"
+    return 1
+  fi
+
   local is_draft="false"
   if [ "$RELEASE_DRAFT" = "true" ]; then
     is_draft="true"
   fi
   
-  gh release create "$VERSION" "dist"/* --title "Release $VERSION" --draft="$is_draft" --notes "check release content for more details"
+  gh release create "$VERSION" "${release_assets[@]}" --title "Release $VERSION" --draft="$is_draft" --notes "check release content for more details"
   [ "$?" -ne "0" ] && err "[create_github_release] failed to create release" && return 1
   
   info "[create_github_release|out]"

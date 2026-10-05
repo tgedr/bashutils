@@ -21,7 +21,7 @@ jobs:
         run: ./helper.sh test
       - name: Verify .bashutils is up to date
         run: |
-          ./helper.sh build_bashutils
+          ./helper.sh build
           git diff --exit-code -- .bashutils
       - name: Create release artifacts
         run: ./helper.sh create_release_artifacts
