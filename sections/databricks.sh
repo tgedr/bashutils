@@ -35,15 +35,15 @@ databricks_set_cli_access()
 databricks_bundle_deploy(){
   info "[databricks_bundle_deploy|in]"
 
-  [ -z $1 ] && err "[databricks_bundle_deploy] missing argument BUNDLE_FOLDER" && exit 1
+  [ -z $1 ] && err "[databricks_bundle_deploy] missing argument BUNDLE_FOLDER" && return 1
   local BUNDLE_FOLDER="$1"
   local BUNDLE_TARGET="local"
   [ ! -z $2 ] && BUNDLE_TARGET="$2"
 
-  [ "main" != "$BUNDLE_TARGET" ] && [ "local" != "$BUNDLE_TARGET" ] && err "[databricks_bundle_deploy] wrong argument BUNDLE_TARGET: $BUNDLE_TARGET" && exit 1
+  [ "main" != "$BUNDLE_TARGET" ] && [ "local" != "$BUNDLE_TARGET" ] && err "[databricks_bundle_deploy] wrong argument BUNDLE_TARGET: $BUNDLE_TARGET" && return 1
   info "[databricks_bundle_deploy] BUNDLE_FOLDER: $BUNDLE_FOLDER   BUNDLE_TARGET: $BUNDLE_TARGET"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$BUNDLE_FOLDER"
 
   databricks bundle validate --target "$BUNDLE_TARGET" --debug && \
@@ -51,7 +51,7 @@ databricks_bundle_deploy(){
 
   result="$?"
   cd "$_pwd"
-  [ "$result" -ne "0" ] && err "[databricks_bundle_deploy|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[databricks_bundle_deploy|out]  => ${result}" && return 1
   info "[databricks_bundle_deploy|out] => ${result}"
 }
 
@@ -65,22 +65,22 @@ databricks_bundle_deploy(){
 databricks_bundle_destroy(){
   info "[databricks_bundle_destroy|in]"
 
-  [ -z $1 ] && err "[databricks_bundle_destroy] missing argument BUNDLE_FOLDER" && exit 1
+  [ -z $1 ] && err "[databricks_bundle_destroy] missing argument BUNDLE_FOLDER" && return 1
   local BUNDLE_FOLDER="$1"
   local BUNDLE_TARGET="local"
   [ ! -z $2 ] && BUNDLE_TARGET="$2"
 
-  [ "main" != "$BUNDLE_TARGET" ] && [ "local" != "$BUNDLE_TARGET" ] && err "[databricks_bundle_destroy] wrong argument BUNDLE_TARGET: $BUNDLE_TARGET" && exit 1
+  [ "main" != "$BUNDLE_TARGET" ] && [ "local" != "$BUNDLE_TARGET" ] && err "[databricks_bundle_destroy] wrong argument BUNDLE_TARGET: $BUNDLE_TARGET" && return 1
   info "[databricks_bundle_destroy] BUNDLE_FOLDER: $BUNDLE_FOLDER   BUNDLE_TARGET: $BUNDLE_TARGET"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$BUNDLE_FOLDER"
 
   databricks bundle destroy --target "$BUNDLE_TARGET" --auto-approve --force-lock --debug
 
   result="$?"
   cd "$_pwd"
-  [ "$result" -ne "0" ] && err "[databricks_bundle_destroy|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[databricks_bundle_destroy|out]  => ${result}" && return 1
   info "[databricks_bundle_destroy|out] => ${result}"
 }
 
@@ -94,15 +94,15 @@ databricks_bundle_destroy(){
 databricks_delete_secret(){
   info "[databricks_delete_secret|in] ($1, $2)"
 
-  [ -z $1 ] && err "[databricks_delete_secret] missing argument SECRET_KEY" && exit 1
+  [ -z $1 ] && err "[databricks_delete_secret] missing argument SECRET_KEY" && return 1
   local SECRET_KEY="$1"
-  [ -z $2 ] && err "[databricks_delete_secret] missing argument SECRET_SCOPE" && exit 1
+  [ -z $2 ] && err "[databricks_delete_secret] missing argument SECRET_SCOPE" && return 1
   local SECRET_SCOPE="$2"
 
   databricks secrets delete-secret $SECRET_SCOPE $SECRET_KEY
   result="$?"
 
-  [ "$result" -ne "0" ] && err "[databricks_delete_secret|out] could not delete the secret" && exit 1
+  [ "$result" -ne "0" ] && err "[databricks_delete_secret|out] could not delete the secret" && return 1
   info "[databricks_delete_secret|out] => ${result}"
 }
 
@@ -116,11 +116,11 @@ databricks_delete_secret(){
 databricks_set_secret(){
   info "[databricks_set_secret|in] ($1, $2, ${3:0:3})"
 
-  [ -z $1 ] && err "[databricks_set_secret] missing argument SECRET_KEY" && exit 1
+  [ -z $1 ] && err "[databricks_set_secret] missing argument SECRET_KEY" && return 1
   local SECRET_KEY="$1"
-  [ -z $2 ] && err "[databricks_set_secret] missing argument SECRET_SCOPE" && exit 1
+  [ -z $2 ] && err "[databricks_set_secret] missing argument SECRET_SCOPE" && return 1
   local SECRET_SCOPE="$2"
-  [ -z $3 ] && err "[databricks_set_secret] missing argument SECRET_VALUE" && exit 1
+  [ -z $3 ] && err "[databricks_set_secret] missing argument SECRET_VALUE" && return 1
   local SECRET_VALUE="$3"
 
   query=$(databricks secrets get-secret $SECRET_SCOPE $SECRET_KEY)
@@ -131,7 +131,7 @@ databricks_set_secret(){
     warn "[databricks_set_secret] secret is already there"
   fi
   result="$?"
-  [ "$result" -ne "0" ] && err "[databricks_set_secret|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[databricks_set_secret|out]  => ${result}" && return 1
   info "[databricks_set_secret|out] => ${result}"
 }
 
@@ -147,13 +147,13 @@ databricks_set_secret(){
 get_azure_artifact(){
   info "[get_azure_artifact|in] ($1, $2, $3, $4, $5)"
 
-  [ -z "$1" ] && err "[get_azure_artifact] missing argument ORGANIZATION" && exit 1
+  [ -z "$1" ] && err "[get_azure_artifact] missing argument ORGANIZATION" && return 1
   local ORGANIZATION="$1"
-  [ -z "$2" ] && err "[get_azure_artifact] missing argument FEED" && exit 1
+  [ -z "$2" ] && err "[get_azure_artifact] missing argument FEED" && return 1
   local FEED="$2"
-  [ -z "$3" ] && err "[get_azure_artifact] missing argument NAME" && exit 1
+  [ -z "$3" ] && err "[get_azure_artifact] missing argument NAME" && return 1
   local NAME="$3"
-  [ -z "$4" ] && err "[get_azure_artifact] missing argument VERSION" && exit 1
+  [ -z "$4" ] && err "[get_azure_artifact] missing argument VERSION" && return 1
   local VERSION="$4"
 
   local TARGET="."
@@ -163,6 +163,6 @@ get_azure_artifact(){
   az artifacts universal download --organization "$ORGANIZATION" --feed "$FEED" --name "$NAME" --version "$VERSION" --path "$TARGET"
   result="$?"
 
-  [ "$result" -ne "0" ] && err "[get_azure_artifact|out] => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[get_azure_artifact|out] => ${result}" && return 1
   info "[get_azure_artifact|out] => ${result}"
 }

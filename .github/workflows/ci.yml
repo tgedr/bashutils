@@ -23,3 +23,9 @@ jobs:
         run: |
           ./helper.sh build_bashutils
           git diff --exit-code -- .bashutils
+      - name: Create release artifacts
+        run: ./helper.sh create_release_artifacts
+      - name: Create GitHub release
+        run: ./helper.sh create_github_release
+        env: 
+          RELEASE_DRAFT: "true"

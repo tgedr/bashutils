@@ -29,7 +29,7 @@ cdk_global_reqs(){
    "@aws-cdk/integ-runner@${INTEG_RUNNER_VERSION}" "@aws-cdk/integ-tests-alpha@${INTEG_TESTS_ALPHA_VERSION}" \
    "jest@${JEST_VERSION}"
   result="$?"
-  [ "$result" -ne "0" ] && err "[cdk_global_reqs|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[cdk_global_reqs|out]  => ${result}" && return 1
   info "[cdk_global_reqs|out] => ${result}"
 }
 
@@ -43,17 +43,17 @@ cdk_global_reqs(){
 cdk_scaffolding(){
   info "[cdk_scaffolding|in] ($1)"
 
-  [ -z $1 ] && err "[cdk_scaffolding] missing argument INFRA_DIR" && exit 1
+  [ -z $1 ] && err "[cdk_scaffolding] missing argument INFRA_DIR" && return 1
   local INFRA_DIR="$1"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$INFRA_DIR"
 
   cdk init app --language typescript
 
   result="$?"
   cd "$_pwd"
-  [ "$result" -ne "0" ] && err "[cdk_scaffolding|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[cdk_scaffolding|out]  => ${result}" && return 1
   info "[cdk_scaffolding|out] => ${result}"
 }
 
@@ -88,7 +88,7 @@ cdk_infra_bootstrap(){
     "$INTEG_TESTS_ALPHA_VERSION" "$JEST_VERSION"  && cdk_scaffolding "$INFRA_DIR"
 
   result="$?"
-  [ "$result" -ne "0" ] && err "[cdk_infra_bootstrap|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[cdk_infra_bootstrap|out]  => ${result}" && return 1
   info "[cdk_infra_bootstrap|out] => ${result}"
 }
 
@@ -131,20 +131,20 @@ cdk_infra()
     local stacks="--all"
   fi
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$tf_dir"
 
   if [ "$operation" == "on" ]; then
     cdk synth "$stacks"
-    [ "$?" -ne "0" ] && err "[infra] couldn't synth" && cd "$_pwd" && exit 1
+    [ "$?" -ne "0" ] && err "[infra] couldn't synth" && cd "$_pwd" && return 1
     cdk deploy "$stacks" --require-approval=never -v --debug
-    [ "$?" -ne "0" ] && err "[infra] couldn't deploy" && cd "$_pwd" && exit 1
+    [ "$?" -ne "0" ] && err "[infra] couldn't deploy" && cd "$_pwd" && return 1
   elif [ "$operation" == "off" ]; then
     cdk destroy "$stacks" --force
-    [ "$?" -ne "0" ] && err "[infra] couldn't destroy" && cd "$_pwd" && exit 1
+    [ "$?" -ne "0" ] && err "[infra] couldn't destroy" && cd "$_pwd" && return 1
   elif [ "$operation" == "bootstrap" ]; then
     cdk bootstrap --force --termination-protection false
-    [ "$?" -ne "0" ] && err "[infra] couldn't bootstrap" && cd "$_pwd" && exit 1
+    [ "$?" -ne "0" ] && err "[infra] couldn't bootstrap" && cd "$_pwd" && return 1
   fi
 
   cd "$_pwd"
@@ -169,11 +169,11 @@ cdk_setup()
     else
       info "[cdk_setup] assuming default infra folder: ${DEFAULT_INFRA_DIR}"
     fi
-    _pwd=`pwd`
+    local _pwd=$(pwd)
     cd "$tf_dir"
     npm install
     result="$?"
     cd "$_pwd"
-    [ "$result" -ne "0" ] && err "[cdk_setup|out]  => ${result}" && exit 1
+    [ "$result" -ne "0" ] && err "[cdk_setup|out]  => ${result}" && return 1
     info "[cdk_setup|out] => ${result}"
 }

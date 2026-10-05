@@ -172,20 +172,38 @@ source_if_exists "$this_folder/$FILE_VARIABLES"
 source_if_exists "$this_folder/$FILE_LOCAL_VARIABLES"
 source_if_exists "$this_folder/$FILE_SECRETS"
 
-
 # <=== HEADER SECTION END  <===
 
 # ===> MAIN SECTION START  ===>
 
 reqs(){
   info "[reqs|in]"
-  _pwd=`pwd`
-  cd "$this_folder"
+  local _pwd
+  local result
+  _pwd=$(pwd)
+  cd "$this_folder" || exit 1
 
-  sudo apt-get update && sudo apt-get install -y bats
-  local result="$?"
+  case "$(uname -s)" in
+    Darwin)
+      if command -v brew >/dev/null 2>&1; then
+        brew install bats-core
+        result="$?"
+      else
+        err "[reqs] Homebrew is required to install bats on macOS"
+        result=1
+      fi
+      ;;
+    Linux)
+      sudo apt-get update && sudo apt-get install -y bats
+      result="$?"
+      ;;
+    *)
+      err "[reqs] unsupported operating system: $(uname -s)"
+      result=1
+      ;;
+  esac
 
-  cd "$_pwd"
+  cd "$_pwd" || exit 1
   local msg="[reqs|out] => ${result}"
   [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
   info "$msg"
@@ -194,7 +212,7 @@ reqs(){
 test(){
   info "[test|in]"
   _pwd=`pwd`
-  cd "$this_folder"
+  cd "$this_folder" || exit 1
 
   bats test
   local result="$?"
@@ -208,37 +226,76 @@ test(){
 build_bashutils(){
   info "[build_bashutils|in]"
   local sections_dir="$this_folder/sections"
+  local dist_dir="$this_folder/dist"
   local out_file="$this_folder/$INCLUDE_FILE"
   local _pwd
   local checksum_result
   _pwd=$(pwd)
 
-  [ ! -d "$sections_dir" ] && err "[build_bashutils] sections folder not found: $sections_dir" && return 1
+  [ ! -d "$sections_dir" ] && err "[build_bashutils] sections folder not found: $sections_dir" && exit 1
 
   local files
   files=("$sections_dir"/*.sh)
-  [ ${#files[@]} -eq 0 ] && err "[build_bashutils] no .sh files found in $sections_dir" && return 1
+  [ ${#files[@]} -eq 0 ] && err "[build_bashutils] no .sh files found in $sections_dir" && exit 1
 
   > "$out_file"
   for f in "${files[@]}"; do
-    cat "$f" >> "$out_file" || return 1
-    echo >> "$out_file" || return 1
+    cat "$f" >> "$out_file" || { err "[build_bashutils] failed to append $f to $out_file"; exit 1; }
+    echo >> "$out_file" || { err "[build_bashutils] failed to append newline to $out_file"; exit 1; }
   done
 
   if command -v sha256sum >/dev/null 2>&1; then
-    cd "$this_folder" || return 1
+    cd "$this_folder" || exit 1
     sha256sum "$INCLUDE_FILE" > "${INCLUDE_FILE}.checksum"
     checksum_result="$?"
-    cd "$_pwd" || return 1
+    cd "$_pwd" || exit 1
     if [ "$checksum_result" -ne 0 ]; then
-      return 1
+      exit 1
     fi
   else
     err "[build_bashutils] please install sha256sum to generate checksum file"
-    return 1
+    exit 1
   fi
 
   info "[build_bashutils|out] => 0"
+}
+
+create_release_artifacts(){
+  info "[create_release_artifacts|in]"
+  local dist_dir="$this_folder/dist"
+  local out_file="$this_folder/$INCLUDE_FILE"
+  local version
+  local version_file="$this_folder/.version"
+
+  rm -rf "$dist_dir"
+  mv "$out_file" "$dist_dir/" || { err "[create_release_artifacts] failed to move $INCLUDE_FILE to $dist_dir"; exit 1; }
+  mv "${out_file}.checksum" "$dist_dir/" || { err "[create_release_artifacts] failed to move ${out_file}.checksum to $dist_dir"; exit 1; }
+
+  read -r value < "$version_file"
+  value=$((10#$value + 1))
+  info "[create_release_artifacts] incremented version to $value"
+  printf '%s\n' "$value" > "$version_file"
+  version="$value"
+
+  mv "$version_file" "$dist_dir/" || { err "[create_release_artifacts] failed to move $version_file to $dist_dir"; exit 1; }
+  info "[create_release_artifacts|out] => 0"
+}
+
+create_github_release(){
+  info "[create_github_release|in]"
+
+  local version_file="$this_folder/.version"
+  read -r version < "$version_file"
+
+  local is_draft="false"
+  if [ "$RELEASE_DRAFT" = "true" ]; then
+    is_draft="true"
+  fi
+  
+  gh release create "$version" "dist"/* --title "Release $version" --draft="$is_draft" --notes "check release content for more details"
+  [ "$?" -ne "0" ] && err "[create_github_release] failed to create release" && return 1
+  
+  info "[create_github_release|out]"
 }
 
 
@@ -253,9 +310,10 @@ usage() {
   usage:
   $(basename "$0") { option }
     options:
-      - reqs               installs required tools and dependencies
-      - test               runs tests
-      - build_bashutils    rebuild .bashutils by concatenating all files in sections/
+      - reqs                        installs required tools and dependencies
+      - test                        runs tests
+      - build_bashutils             rebuild .bashutils by concatenating all files in sections/
+      - create_release_artifacts    create release artifacts in the dist directory
 EOM
   exit 1
 }
@@ -275,6 +333,9 @@ case "$1" in
     ;;
   download_bashutils_if_newer)
     download_bashutils_if_newer
+    ;;
+  create_release_artifacts)
+    create_release_artifacts
     ;;
   *)
     usage

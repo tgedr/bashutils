@@ -21,7 +21,9 @@ terraform_autodeploy(){
   cd "$folder"
 
   terraform init
+  if [ ! "$?" -eq "0" ]; then err "[terraform_autodeploy] could not init" && cd "$_pwd" && return 1; fi
   terraform plan
+  if [ ! "$?" -eq "0" ]; then err "[terraform_autodeploy] could not plan" && cd "$_pwd" && return 1; fi
   terraform apply -auto-approve -lock=true -lock-timeout=10m
   if [ ! "$?" -eq "0" ]; then err "[terraform_autodeploy] could not apply" && cd "$_pwd" && return 1; fi
   cd "$_pwd"

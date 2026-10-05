@@ -6,31 +6,34 @@
 #   name: test_js_lambda
 #   purpose: installs npm dependencies and runs Jest tests for a JavaScript Lambda function
 #   parameters: $1 (path to the Lambda function directory containing package.json)
+#   returns: 0 if install and tests succeed, nonzero otherwise
 #   requires: npm, jest
 ############################
 test_js_lambda(){
   info "[test_js_lambda|in] ({$1})"
 
-  [ -z $1 ] && err "[get_cloudfront_cidr] missing argument FUNCTION_DIR" && exit 1
+  [ -z $1 ] && err "[test_js_lambda] missing argument FUNCTION_DIR" && return 1
   local FUNCTION_DIR="$1"
-  _pwd=`pwd`
-  cd "$FUNCTION_DIR"
+  local _pwd=$(pwd)
+  local result
+  cd "$FUNCTION_DIR" || return 1
 
-  npm install
+  npm install || { result=$?; cd "$_pwd"; return "$result"; }
   jest
-
-  result="$?"
-  cd "$_pwd"
-  [ "$result" -ne "0" ] && err "[test_js_lambda|out]  => ${result}" && exit 1
+  result=$?
+  cd "$_pwd" || return 1
+  [ "$result" -ne "0" ] && err "[test_js_lambda|out]  => ${result}" && return "$result"
   info "[test_js_lambda|out] => ${result}"
 }
 
 ############################
 #   name: zip_js_lambda_function
 #   purpose: packages a JavaScript Lambda function into a zip archive;
-#            installs npm dependencies if package.json is present and removes the bundled aws-sdk
-#            (provided by the Lambda runtime) to reduce bundle size
+#            installs npm dependencies if package.json is present and excludes the bundled aws-sdk
+#            (provided by the Lambda runtime) from the archive without deleting it from source
 #   parameters: $1 (source directory), $2 (output zip file path), $3+ (files/folders to include in the zip)
+#   returns: 0 on success, nonzero if installation or packaging fails
+#   side-effects: runs npm install in the source directory; excludes aws-sdk only from the archive
 #   requires: npm, zip
 ############################
 
@@ -45,20 +48,18 @@ zip_js_lambda_function(){
 
   local src_dir="$1"
   local zip_file="$2"
-  local files="${@:3}"
-  local AWS_SDK_MODULE_PATH=$src_dir/node_modules/aws-sdk
+  local -a files=("${@:3}")
 
-  _pwd=`pwd`
-  cd "$src_dir"
+  local _pwd=$(pwd)
+  cd "$src_dir" || return 1
 
   if [ -f "package.json" ]; then
     npm install &>/dev/null
     if [ ! "$?" -eq "0" ] ; then err "[zip_js_lambda_function] could not install dependencies" && cd "$_pwd" && return 1; fi
-    if [ -d "${AWS_SDK_MODULE_PATH}" ]; then rm -r "$AWS_SDK_MODULE_PATH"; fi
   fi
 
   rm -f "$zip_file"
-  zip -9 -q -r "$zip_file" "$files" &>/dev/null
+  zip -9 -q -r "$zip_file" "${files[@]}" -x 'node_modules/aws-sdk/*' &>/dev/null
   if [ ! "$?" -eq "0" ] ; then err "[zip_js_lambda_function] could not zip it" && cd "$_pwd" && return 1; fi
 
   cd "$_pwd"
@@ -80,7 +81,7 @@ get_function_release(){
   local repo="$1"
   local artifact="$2"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
 
   curl -s "https://api.github.com/repos/${repo}/releases/latest" \
@@ -126,11 +127,11 @@ download_function(){
 call_grafana_api(){
   info "[call_grafana_api|in] (${1:0:3}, ${2:0:3})"
 
-  [ -z $1 ] && err "[call_grafana_api] missing argument AZURE_ACCESS_TOKEN" && exit 1
+  [ -z $1 ] && err "[call_grafana_api] missing argument AZURE_ACCESS_TOKEN" && return 1
   AZURE_ACCESS_TOKEN="$1"
-  [ -z $2 ] && err "[call_grafana_api] missing argument GRAFANA_API_TOKEN" && exit 1
+  [ -z $2 ] && err "[call_grafana_api] missing argument GRAFANA_API_TOKEN" && return 1
   GRAFANA_API_TOKEN="$2"
-  [ -z $3 ] && err "[call_grafana_api] missing argument GRAFANA_API_URL" && exit 1
+  [ -z $3 ] && err "[call_grafana_api] missing argument GRAFANA_API_URL" && return 1
   GRAFANA_API_URL="$3"
 
   local response=$(curl -s -X GET "$GRAFANA_API_URL"  \
@@ -138,6 +139,6 @@ call_grafana_api(){
       -H "X-Bifrost-Grafana-SA: Bearer ${GRAFANA_API_TOKEN}" )
   result="$?"
 
-  [ "$result" -ne "0" ] && err "[call_grafana_api|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[call_grafana_api|out]  => ${result}" && return 1
   info "[call_grafana_api|out] => ${response}"
 }

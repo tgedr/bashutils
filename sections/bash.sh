@@ -33,16 +33,16 @@ verify_prereqs(){
 
 ############################
 #   name: verify_env
-#   purpose: verifies that all required environment variable names are provided as non-empty arguments
-#   parameters: $@ (one or more environment variable names to verify are non-empty)
-#   returns: 0 if all names are non-empty, 1 on first empty name
+#   purpose: verifies that each named environment variable has a non-empty value
+#   parameters: $@ (one or more environment variable names)
+#   returns: 0 if all values are non-empty, 1 if any variable is unset or empty
 ############################
 verify_env(){
   info "[verify_env] ..."
   for arg in "$@"
   do
       debug "[verify_env] ... checking $arg"
-      if [ -z "${!arg}" ]; then err "[verify_env] please define env var: $arg" && exit 1; fi
+      if [ -z "${!arg}" ]; then err "[verify_env] please define env var: $arg" && return 1; fi
   done
   info "[verify_env] ...done."
 }
@@ -55,7 +55,7 @@ verify_env(){
 ############################
 package(){
   info "[package] ..."
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
 
   tar cjpvf "$TAR_NAME" "$INCLUDE_FILE"
@@ -63,36 +63,6 @@ package(){
 
   cd "$_pwd"
   info "[package] ...done."
-}
-
-############################
-#   name: create_from_template_and_envvars
-#   purpose: renders a template file by substituting named environment variables using sed, writing the result to a destination file
-#   parameters: $1 (template file path), $2 (destination file path), $3+ (names of environment variables to substitute)
-#   returns: 0 on success, 1 if fewer than 3 arguments are provided or sed fails
-############################
-create_from_template_and_envvars() {
-  info "[create_from_template_and_envvars] ...( $@ )"
-  local usage_msg=$'create_from_template_and_envvars: creates a file from a template substituting env vars:\nusage:\n    create_from_template_and_envvars TEMPLATE DESTINATION [ENVVARS...]'
-
-  if [ -z "$3" ] ; then echo "$usage_msg" && return 1; fi
-
-  local template="$1"
-  local destination="$2"
-  local vars="${@:3}"
-
-  local expression=""
-  for var in $vars
-  do
-    eval val=\${"$var"}
-    #echo "$var: $val"
-    expression="${expression}s/${var}/${val}/g;"
-  done
-
-  #echo "expression: $expression"
-  sed "${expression}" "$template" > "$destination"
-  if [ ! "$?" -eq "0" ]; then err "[create_from_template_and_envvars] sed command was not successful" && return 1; fi
-  info "[create_from_template_and_envvars] ...done."
 }
 
 ############################
@@ -105,13 +75,17 @@ create_from_template_and_envvars() {
 ############################
 add_entry_to_file()
 {
-  info "[add_entry_to_file|in] ($1, $2, ${3:0:5})"
+  info "[add_entry_to_file|in] ($1, $2, [redacted])"
   [ -z "$2" ] && err "no parameters provided" && return 1
   local file="$1"
   local file_path="${this_folder}/${file}"
   local var_name="$2"
   local var_value="$3"
 
+  [ -z "$file" ] && err "[add_entry_to_file] no file provided" && return 1
+  if [ ! -f "$file_path" ]; then
+    touch "$file_path"
+  fi
   if [ -f "$file_path" ]; then
     if [[ "$OSTYPE" == "darwin"* ]]; then
       sed -i '' "/export $var_name=/d" "$file_path"
@@ -168,7 +142,7 @@ add_entry_to_local_variables()
 ############################
 add_entry_to_secrets()
 {
-  info "[add_entry_to_secrets|in] ($1, ${2:0:7})"
+  info "[add_entry_to_secrets|in] ($1, [redacted])"
   [ -z "$1" ] && err "no parameters provided" && return 1
 
   target_file="${FILE_SECRETS}"
@@ -187,14 +161,14 @@ git_tag_and_push()
 {
   info "[git_tag_and_push|in] ($1, ${2:0:7})"
 
-  [ -z "$1" ] && err "must provide parameter VERSION" && exit 1
+  [ -z "$1" ] && err "must provide parameter VERSION" && return 1
   local VERSION="$1"
-  [ -z "$2" ] && err "must provide parameter COMMIT_HASH" && exit 1
+  [ -z "$2" ] && err "must provide parameter COMMIT_HASH" && return 1
   local COMMIT_HASH="$2"
 
   git tag -a "$VERSION" "$COMMIT_HASH" -m "release $VERSION" && git push --tags
   result="$?"
-  [ "$result" -ne "0" ] && err "[git_tag_and_push|out] could not tag and push" && exit 1
+  [ "$result" -ne "0" ] && err "[git_tag_and_push|out] could not tag and push" && return 1
 
   info "[git_tag_and_push|out] => ${result}"
 }
@@ -217,7 +191,7 @@ git_tag_and_push_auto_uv()
   git tag -a "$version" "$commit_hash" -m "release $version" && git push --tags
   result="$?"
   
-  [ "$result" -ne "0" ] && err "[git_tag_and_push|out] could not tag and push" && exit 1
+  [ "$result" -ne "0" ] && err "[git_tag_and_push|out] could not tag and push" && return 1
 
   info "[git_tag_and_push_auto_uv|out] => ${result}"
 }
@@ -234,7 +208,7 @@ get_latest_tag() {
   latest_tag="$(git describe --tags --abbrev=0 2>/dev/null)"
   if [ -z "$latest_tag" ]; then
     err "[get_latest_tag|out] => 1 (no tags found)" >&2
-    exit 1
+    return 1
   fi
 
   echo "$latest_tag"
@@ -256,14 +230,14 @@ changelog(){
   [ ! -z $1 ] && FILE="$1"
   info "[changelog] creating file: $FILE"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
 
   git log --pretty=format:"- %h %as %d %s" > "$FILE"
   result="$?"
 
   cd "$_pwd"
-  [ "$result" -ne "0" ] && err "[changelog|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[changelog|out]  => ${result}" && return 1
   echo "[changelog|out] => $result"
 }
 
@@ -291,25 +265,27 @@ proj_code_transfer(){
   # export CODE_TRANSFER_IMPORT_REPLACEMENT_ORIGIN="ssds_qsd_dataops."
   # export CODE_TRANSFER_IMPORT_REPLACEMENT_TARGET="tgedr.dataops."
 
-  [ -z $1 ] && err "[proj_code_transfer] missing argument TMP_FOLDER" && exit 1
+  [ -z $1 ] && err "[proj_code_transfer] missing argument TMP_FOLDER" && return 1
   local TMP_FOLDER="$1"
-  [ -z $2 ] && err "[proj_code_transfer] missing argument CODE_TRANSFER_FOLDERS" && exit 1
+  [ -z $2 ] && err "[proj_code_transfer] missing argument CODE_TRANSFER_FOLDERS" && return 1
   local CODE_TRANSFER_FOLDERS="$2"
-  [ -z $3 ] && err "[proj_code_transfer] missing argument CODE_TRANSFER_PATH_REPLACEMENT_ORIGIN" && exit 1
+  [ -z $3 ] && err "[proj_code_transfer] missing argument CODE_TRANSFER_PATH_REPLACEMENT_ORIGIN" && return 1
   local CODE_TRANSFER_PATH_REPLACEMENT_ORIGIN="$3"
-  [ -z $4 ] && err "[proj_code_transfer] missing argument CODE_TRANSFER_PATH_REPLACEMENT_TARGET" && exit 1
+  [ -z $4 ] && err "[proj_code_transfer] missing argument CODE_TRANSFER_PATH_REPLACEMENT_TARGET" && return 1
   local CODE_TRANSFER_PATH_REPLACEMENT_TARGET="$4"
-  [ -z $5 ] && err "[proj_code_transfer] missing argument CODE_TRANSFER_IMPORT_REPLACEMENT_ORIGIN" && exit 1
+  [ -z $5 ] && err "[proj_code_transfer] missing argument CODE_TRANSFER_IMPORT_REPLACEMENT_ORIGIN" && return 1
   local CODE_TRANSFER_IMPORT_REPLACEMENT_ORIGIN="$5"
-  [ -z $6 ] && err "[proj_code_transfer] missing argument CODE_TRANSFER_IMPORT_REPLACEMENT_TARGET" && exit 1
+  [ -z $6 ] && err "[proj_code_transfer] missing argument CODE_TRANSFER_IMPORT_REPLACEMENT_TARGET" && return 1
   local CODE_TRANSFER_IMPORT_REPLACEMENT_TARGET="$6"
+  local -a source_folders
+  read -r -a source_folders <<< "$CODE_TRANSFER_FOLDERS"
 
-   _pwd=`pwd`
+   local _pwd=$(pwd)
   cd "$this_folder"
 
   [[ ! -d "$TMP_FOLDER" ]] && mkdir -p "$TMP_FOLDER"
 
-  for item in "${CODE_TRANSFER_FOLDERS[@]}"; do
+  for item in "${source_folders[@]}"; do
     info "[proj_code_transfer] checking: $item"
     find ./$item -type f | while read -r filepath; do
 
@@ -328,7 +304,7 @@ proj_code_transfer(){
   local result="$?"
   cd "$_pwd"
   local msg="[proj_code_transfer|out] => ${result}"
-  [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
   info "$msg"
 }
 
@@ -336,25 +312,26 @@ proj_code_transfer(){
 #   name: add_pypi_config
 #   purpose: creates ~/.pypirc with a token-based PyPI auth entry if the file does not already exist
 #   parameters: $1 (PyPI API token)
+#   returns: 0 on success, nonzero if the file cannot be created or secured
+#   side-effects: creates or changes permissions on ~/.pypirc
 ############################
 
 add_pypi_config(){
-  info "[add_pypi_config] ..."
+  info "[add_pypi_config|in]"
 
-  [ -z $1 ] && err "[add_pypi_config] missing argument PYPI_TOKEN" && exit 1
+  [ -z $1 ] && err "[add_pypi_config] missing argument PYPI_TOKEN" && return 1
   local PYPI_TOKEN="$1"
   
-  _pwd=`pwd`
-  cd ~/
-
-  if [ ! -f ".pypirc" ]; then
+  local pypirc="$HOME/.pypirc"
+  if [ ! -f "$pypirc" ]; then
     info "[add_pypi_config] no '.pypirc' going to create it"
-    echo "[pypi]" > .pypirc
-    echo "username = __token__" >> .pypirc
-    echo "password = $PYPI_TOKEN" >> .pypirc
+    (umask 077; printf '[pypi]\nusername = __token__\npassword = %s\n' "$PYPI_TOKEN" > "$pypirc") || {
+      err "[add_pypi_config] could not create ~/.pypirc"
+      return 1
+    }
   fi
-  cd "$_pwd"
-  info "[add_pypi_config] ...done."
+  chmod 600 "$pypirc" || { err "[add_pypi_config] could not secure ~/.pypirc"; return 1; }
+  info "[add_pypi_config|out]"
 }
 
 ############################
@@ -371,10 +348,10 @@ assert_uv_config(){
   which uv 1>/dev/null
   if [ "$?" -ne "0" ]; then 
     curl -LsSf https://astral.sh/uv/install.sh | sh
-    [ "$?" -ne "0" ] && err "[assert_uv_config|out] failed" && exit 1
+    [ "$?" -ne "0" ] && err "[assert_uv_config|out] failed" && return 1
   fi
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
   if [ ! -f "$this_folder/pyproject.toml" ]; then
     uv init
@@ -387,7 +364,7 @@ assert_uv_config(){
   fi
   cd "$_pwd"
 
-  [ "$result" -ne "0" ] && err "[assert_uv_config|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[assert_uv_config|out]  => ${result}" && return 1
   info "[assert_uv_config|out]"
 }
 
@@ -407,8 +384,6 @@ print_uuid(){
   echo "[print_uuid|out]"
 }
 
-
-
 ############################
 #   name: collect_dot_git
 #   purpose: archives the .git directory of the project into a compressed tar archive
@@ -417,7 +392,7 @@ print_uuid(){
 ############################
 collect_dot_git(){
   info "[collect_dot_git|in] ($1)"
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
 
   local OUTPUT_FILE="${1:-git.tar.gz}"
@@ -426,7 +401,7 @@ collect_dot_git(){
 
   cd "$_pwd"
   local msg="[collect_dot_git|out] => ${result}"
-  [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
   info "$msg"
 }
 
@@ -445,10 +420,10 @@ create_release_documentation(){
   local TARGET_DIR="$4"
 
   if [ -z "$GIT_TAR" ] || [ -z "$PRS_PDF" ] || [ -z "$QA_PDF" ] || [ -z "$TARGET_DIR" ]; then
-    err "[create_release_documentation] missing required arguments: GIT_TAR, PRS_PDF, QA_PDF, TARGET_DIR" && exit 1
+    err "[create_release_documentation] missing required arguments: GIT_TAR, PRS_PDF, QA_PDF, TARGET_DIR" && return 1
   fi
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
 
   rm -f $TARGET_DIR
@@ -462,7 +437,7 @@ create_release_documentation(){
   cd "$_pwd"
 
   local msg="[create_release_documentation|out] => ${result}"
-  [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
   info "$msg"
 }
 
@@ -508,7 +483,7 @@ generate_pr_approvals_md() {
   local output_file="$3"
 
   if [ -z "$repo" ] || [ -z "$branch" ] || [ -z "$output_file" ]; then
-    err "[generate_pr_approvals_md] missing required arguments: repo, branch, output_file" && exit 1
+    err "[generate_pr_approvals_md] missing required arguments: repo, branch, output_file" && return 1
   fi
 
   uv run python -c "from tgedr_pycommons.cicd.pr_report_generator import generate_pr_approvals_md; generate_pr_approvals_md('$repo', '$branch', '$output_file')"
@@ -530,3 +505,24 @@ generate_pdf_from_md() {
   uv run python -c "from tgedr_pycommons.cicd.markdown_to_pdf import convert; convert('$input_md', '$output_pdf')"
 }
 
+############################
+#   name: create_github_release
+#   purpose: creates a GitHub release for a given version tag, uploading all files from dist/; supports draft mode via RELEASE_DRAFT env var
+#   parameters: $1 (version tag string)
+#   requires: gh CLI, RELEASE_DRAFT (env var, optional)
+############################
+create_github_release(){
+  info "[create_github_release|in] ($1)"
+
+  [ -z "$1" ] && err "[create_github_release] missing argument VERSION" && return 1
+  local VERSION="$1"
+  local is_draft="false"
+  if [ "$RELEASE_DRAFT" = "true" ]; then
+    is_draft="true"
+  fi
+  
+  gh release create "$VERSION" "dist"/* --title "Release $VERSION" --draft="$is_draft" --notes "check release content for more details"
+  [ "$?" -ne "0" ] && err "[create_github_release] failed to create release" && return 1
+  
+  info "[create_github_release|out]"
+}

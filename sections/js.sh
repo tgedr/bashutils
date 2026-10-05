@@ -11,17 +11,17 @@
 npm_deps(){
   info "[npm_deps|in] ($1)"
 
-  [ -z $1 ] && err "[npm_deps] missing argument INFRA_DIR" && exit 1
+  [ -z $1 ] && err "[npm_deps] missing argument INFRA_DIR" && return 1
   local INFRA_DIR="$1"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$INFRA_DIR"
 
   npm install
 
   result="$?"
   cd "$_pwd"
-  [ "$result" -ne "0" ] && err "[npm_deps|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[npm_deps|out]  => ${result}" && return 1
   info "[npm_deps|out] => ${result}"
 }
 
@@ -42,7 +42,7 @@ npm_publish(){
   [ -z $3 ] && err "[npm_publish] missing argument FOLDER" && return 1
   local folder="$3"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$folder"
   npm config set "//${registry}/:_authToken" "${token}"
   npm publish . --access="public"

@@ -6,31 +6,34 @@
 #   name: test_js_lambda
 #   purpose: installs npm dependencies and runs Jest tests for a JavaScript Lambda function
 #   parameters: $1 (path to the Lambda function directory containing package.json)
+#   returns: 0 if install and tests succeed, nonzero otherwise
 #   requires: npm, jest
 ############################
 test_js_lambda(){
   info "[test_js_lambda|in] ({$1})"
 
-  [ -z $1 ] && err "[get_cloudfront_cidr] missing argument FUNCTION_DIR" && exit 1
+  [ -z $1 ] && err "[test_js_lambda] missing argument FUNCTION_DIR" && return 1
   local FUNCTION_DIR="$1"
-  _pwd=`pwd`
-  cd "$FUNCTION_DIR"
+  local _pwd=$(pwd)
+  local result
+  cd "$FUNCTION_DIR" || return 1
 
-  npm install
+  npm install || { result=$?; cd "$_pwd"; return "$result"; }
   jest
-
-  result="$?"
-  cd "$_pwd"
-  [ "$result" -ne "0" ] && err "[test_js_lambda|out]  => ${result}" && exit 1
+  result=$?
+  cd "$_pwd" || return 1
+  [ "$result" -ne "0" ] && err "[test_js_lambda|out]  => ${result}" && return "$result"
   info "[test_js_lambda|out] => ${result}"
 }
 
 ############################
 #   name: zip_js_lambda_function
 #   purpose: packages a JavaScript Lambda function into a zip archive;
-#            installs npm dependencies if package.json is present and removes the bundled aws-sdk
-#            (provided by the Lambda runtime) to reduce bundle size
+#            installs npm dependencies if package.json is present and excludes the bundled aws-sdk
+#            (provided by the Lambda runtime) from the archive without deleting it from source
 #   parameters: $1 (source directory), $2 (output zip file path), $3+ (files/folders to include in the zip)
+#   returns: 0 on success, nonzero if installation or packaging fails
+#   side-effects: runs npm install in the source directory; excludes aws-sdk only from the archive
 #   requires: npm, zip
 ############################
 
@@ -45,20 +48,18 @@ zip_js_lambda_function(){
 
   local src_dir="$1"
   local zip_file="$2"
-  local files="${@:3}"
-  local AWS_SDK_MODULE_PATH=$src_dir/node_modules/aws-sdk
+  local -a files=("${@:3}")
 
-  _pwd=`pwd`
-  cd "$src_dir"
+  local _pwd=$(pwd)
+  cd "$src_dir" || return 1
 
   if [ -f "package.json" ]; then
     npm install &>/dev/null
     if [ ! "$?" -eq "0" ] ; then err "[zip_js_lambda_function] could not install dependencies" && cd "$_pwd" && return 1; fi
-    if [ -d "${AWS_SDK_MODULE_PATH}" ]; then rm -r "$AWS_SDK_MODULE_PATH"; fi
   fi
 
   rm -f "$zip_file"
-  zip -9 -q -r "$zip_file" "$files" &>/dev/null
+  zip -9 -q -r "$zip_file" "${files[@]}" -x 'node_modules/aws-sdk/*' &>/dev/null
   if [ ! "$?" -eq "0" ] ; then err "[zip_js_lambda_function] could not zip it" && cd "$_pwd" && return 1; fi
 
   cd "$_pwd"
@@ -80,7 +81,7 @@ get_function_release(){
   local repo="$1"
   local artifact="$2"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
 
   curl -s "https://api.github.com/repos/${repo}/releases/latest" \
@@ -126,11 +127,11 @@ download_function(){
 call_grafana_api(){
   info "[call_grafana_api|in] (${1:0:3}, ${2:0:3})"
 
-  [ -z $1 ] && err "[call_grafana_api] missing argument AZURE_ACCESS_TOKEN" && exit 1
+  [ -z $1 ] && err "[call_grafana_api] missing argument AZURE_ACCESS_TOKEN" && return 1
   AZURE_ACCESS_TOKEN="$1"
-  [ -z $2 ] && err "[call_grafana_api] missing argument GRAFANA_API_TOKEN" && exit 1
+  [ -z $2 ] && err "[call_grafana_api] missing argument GRAFANA_API_TOKEN" && return 1
   GRAFANA_API_TOKEN="$2"
-  [ -z $3 ] && err "[call_grafana_api] missing argument GRAFANA_API_URL" && exit 1
+  [ -z $3 ] && err "[call_grafana_api] missing argument GRAFANA_API_URL" && return 1
   GRAFANA_API_URL="$3"
 
   local response=$(curl -s -X GET "$GRAFANA_API_URL"  \
@@ -138,7 +139,7 @@ call_grafana_api(){
       -H "X-Bifrost-Grafana-SA: Bearer ${GRAFANA_API_TOKEN}" )
   result="$?"
 
-  [ "$result" -ne "0" ] && err "[call_grafana_api|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[call_grafana_api|out]  => ${result}" && return 1
   info "[call_grafana_api|out] => ${response}"
 }
 
@@ -156,7 +157,7 @@ call_grafana_api(){
 aws_find_kms_alias(){
   echo "[aws_find_kms_alias|in] ($1)"
 
-  [ -z $1 ] && err "[aws_find_kms_alias] missing argument ALIAS" && exit 1
+  [ -z $1 ] && err "[aws_find_kms_alias] missing argument ALIAS" && return 1
   local ALIAS="$1"
   result=1
 
@@ -180,7 +181,7 @@ aws_find_kms_alias(){
 aws_get_cloudfront_cidr(){
   info "[aws_get_cloudfront_cidr|in] ($1)"
 
-  [ -z $1 ] && err "[aws_get_cloudfront_cidr] missing argument OUTPUT_FILE" && exit 1
+  [ -z $1 ] && err "[aws_get_cloudfront_cidr] missing argument OUTPUT_FILE" && return 1
   local OUTPUT_FILE="$1"
 
   local prefix_list_id=$(aws ec2 describe-managed-prefix-lists | jq -r ".\"PrefixLists\" | .[] | select(.PrefixListName == \"com.amazonaws.global.cloudfront.origin-facing\") | .PrefixListId")
@@ -188,7 +189,7 @@ aws_get_cloudfront_cidr(){
   echo $outputs | jq -r ".\"Entries\"" > "$OUTPUT_FILE"
 
   result="$?"
-  [ "$result" -ne "0" ] && err "[aws_get_cloudfront_cidr|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[aws_get_cloudfront_cidr|out]  => ${result}" && return 1
   info "[aws_get_cloudfront_cidr|out] => ${result}"
 }
 
@@ -227,7 +228,7 @@ aws_set_profile(){
 
   result="$?"
   cd "$_pwd"
-  [ "$result" -ne "0" ] && err "[aws_set_profile|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[aws_set_profile|out]  => ${result}" && return 1
   info "[aws_set_profile|out] => ${result}"
 }
 
@@ -239,12 +240,15 @@ aws_set_profile(){
 #   name: az_sp_assign_subscription
 #   purpose: grants Contributor role to a service principal on the specified Azure subscription
 #   parameters: none
+#   returns: 0 on success, nonzero if the role assignment fails
 #   requires: APP_ID (service principal app/client ID), ARM_SUBSCRIPTION_ID, az
 ############################
 az_sp_assign_subscription()
 {
   info "[az_sp_assign_subscription|in]"
   az role assignment create --assignee "${APP_ID}" --role "Contributor" --scope "/subscriptions/${ARM_SUBSCRIPTION_ID}"
+  local result=$?
+  [ "$result" -ne 0 ] && err "[az_sp_assign_subscription] role assignment failed" && return "$result"
   info "[az_sp_assign_subscription|out]"
 }
 
@@ -252,13 +256,16 @@ az_sp_assign_subscription()
 #   name: az_sp_login
 #   purpose: authenticates the Azure CLI using service principal credentials (non-interactive)
 #   parameters: none
+#   returns: 0 on success, nonzero if login fails
 #   requires: APP_ID (client ID), ARM_CLIENT_SECRET, ARM_TENANT_ID, az
 ############################
 
 az_sp_login()
 {
   info "[az_sp_login|in]"
-  az login --service-principal -u "${APP_ID}" -p "${ARM_CLIENT_SECRET}" --tenant "${ARM_TENANT_ID}" #--subscription "${ARM_SUBSCRIPTION_ID}"
+  az login --service-principal -u "${APP_ID}" -p "${ARM_CLIENT_SECRET}" --tenant "${ARM_TENANT_ID}"
+  local result=$?
+  [ "$result" -ne 0 ] && err "[az_sp_login] Azure login failed" && return "$result"
   info "[az_sp_login|out]"
 }
 
@@ -266,6 +273,7 @@ az_sp_login()
 #   name: az_login_check
 #   purpose: validates that the current Azure CLI session is active by performing a lightweight read-only API call
 #   parameters: none
+#   returns: 0 if the API call succeeds, nonzero otherwise
 #   requires: az
 ############################
 
@@ -273,6 +281,8 @@ az_login_check()
 {
   info "[az_login_check|in]"
   az vm list-sizes --location westus
+  local result=$?
+  [ "$result" -ne 0 ] && err "[az_login_check] Azure CLI request failed" && return "$result"
   info "[az_login_check|out]"
 }
 
@@ -280,6 +290,7 @@ az_login_check()
 #   name: az_logout
 #   purpose: signs out of the Azure CLI, clearing all cached credentials
 #   parameters: none
+#   returns: 0 on success, nonzero if logout fails
 #   requires: az
 ############################
 
@@ -287,6 +298,8 @@ az_logout()
 {
   info "[az_logout|in]"
   az logout
+  local result=$?
+  [ "$result" -ne 0 ] && err "[az_logout] Azure logout failed" && return "$result"
   info "[az_logout|out]"
 }
 
@@ -294,6 +307,7 @@ az_logout()
 #   name: az_list_sp_roles
 #   purpose: lists all role assignments (principalName, role, scope) for a given service principal
 #   parameters: $1 (service principal app display name or object ID)
+#   returns: 0 on success, nonzero if the query fails
 #   requires: az
 ############################
 
@@ -301,9 +315,11 @@ az_list_sp_roles()
 {
   info "[az_list_sp_roles|in] ($1)"
 
-  [ -z "$1" ] && err "no sp app display name provided" && exit 1
-  sp_app_name="$1"
+  [ -z "$1" ] && err "no sp app display name provided" && return 1
+  local sp_app_name="$1"
   az role assignment list --all --assignee "${sp_app_name}" --output json --query '[].{principalName:principalName, roleDefinitionName:roleDefinitionName, scope:scope}'
+  local result=$?
+  [ "$result" -ne 0 ] && err "[az_list_sp_roles] role query failed" && return "$result"
 
   info "[az_list_sp_roles|out]"
 }
@@ -314,15 +330,17 @@ az_list_sp_roles()
 #            adds permissive CORS if not already configured, and stores the resulting website URL
 #            in the variables file via add_entry_to_variables
 #   parameters: $1 (storage account name), $2 (resource group name)
+#   returns: 0 on success, nonzero if Azure configuration or persistence fails
+#   side-effects: enables static website hosting, may add wildcard CORS, writes WEBSITE_URL
 #   requires: az, add_entry_to_variables
 ############################
 
 az_storage_account_web_config(){
   info "[az_storage_account_web_config|in] ($1, $2)"
 
-  [ -z "$1" ] && err "[az_storage_account_web_config] no STORAGE_ACCOUNT param provided" && exit 1
+  [ -z "$1" ] && err "[az_storage_account_web_config] no STORAGE_ACCOUNT param provided" && return 1
   local STORAGE_ACCOUNT="$1"
-  [ -z "$2" ] && err "[az_storage_account_web_config] no resource group provided" && exit 1
+  [ -z "$2" ] && err "[az_storage_account_web_config] no resource group provided" && return 1
   local RESOURCE_GROUP="$2"
 
   az storage blob service-properties update --account-name "$STORAGE_ACCOUNT" --static-website true \
@@ -330,9 +348,9 @@ az_storage_account_web_config(){
   result="$?"
 
   if [ "$result" -eq "0" ]; then
-    cors_config=$(az storage cors list --account-name pvdi0textmining0website)
+    cors_config=$(az storage cors list --account-name "$STORAGE_ACCOUNT")
     cors_result="$?"
-    info "[az_storage_account_web_config] cors_config result: $?"
+    info "[az_storage_account_web_config] cors_config result: $cors_result"
     info "[az_storage_account_web_config] cors_config: ->$cors_config<-"
 
     if [[ "$cors_result" -eq "0" && "$cors_config" != "[]" ]]; then
@@ -350,7 +368,7 @@ az_storage_account_web_config(){
     result="$?"
   fi
 
-  [ "$result" -ne "0" ] && err "[az_storage_account_web_config|out] could not configure bucket" && exit 1
+  [ "$result" -ne "0" ] && err "[az_storage_account_web_config|out] could not configure bucket" && return 1
 
   info "[az_storage_account_web_config|out] => ${result}"
 }
@@ -359,21 +377,21 @@ az_storage_account_web_config(){
 #   name: az_upload_static_website
 #   purpose: uploads all files from a local folder to the '$web' blob container of an Azure storage account (overwrites existing blobs)
 #   parameters: $1 (storage account name), $2 (local source folder path)
+#   returns: 0 on success, nonzero if upload fails
 #   requires: az
 ############################
 
 az_upload_static_website(){
   info "[az_upload_static_website|in] ($1, $2)"
 
-  [ -z "$1" ] && err "[az_upload_static_website] no STORAGE_ACCOUNT param provided" && exit 1
+  [ -z "$1" ] && err "[az_upload_static_website] no STORAGE_ACCOUNT param provided" && return 1
   local STORAGE_ACCOUNT="$1"
-  [ -z "$2" ] && err "[az_upload_static_website] no SOURCE_FOLDER param provided" && exit 1
+  [ -z "$2" ] && err "[az_upload_static_website] no SOURCE_FOLDER param provided" && return 1
   local SOURCE_FOLDER="$2"
 
-  az storage blob upload-batch --account-name $STORAGE_ACCOUNT --source $SOURCE_FOLDER --destination '$web' --debug --verbose --overwrite
-
+  az storage blob upload-batch --account-name "$STORAGE_ACCOUNT" --source "$SOURCE_FOLDER" --destination '$web' --debug --verbose --overwrite
   result="$?"
-  [ "$result" -ne "0" ] && err "[az_upload_static_website|out] could not configure bucket" && exit 1
+  [ "$result" -ne "0" ] && err "[az_upload_static_website|out] could not upload static website" && return 1
 
   info "[az_upload_static_website|out] => ${result}"
 }
@@ -383,35 +401,44 @@ az_upload_static_website(){
 #   purpose: obtains an OAuth2 access token from Azure AD using client credentials flow
 #            and persists it as AZURE_ACCESS_TOKEN in the secrets file via add_entry_to_secrets
 #   parameters: $1 (Azure tenant ID), $2 (client/app ID), $3 (client secret), $4 (OAuth2 scope, e.g. 'https://management.azure.com/.default')
+#   returns: 0 on success, nonzero if the request, response validation, or secret persistence fails
+#   side-effects: writes AZURE_ACCESS_TOKEN to FILE_SECRETS
 #   requires: curl, jq, add_entry_to_secrets
 ############################
 
 get_azure_access_token(){
-  info "[get_azure_access_token|in] ($1, $2, ${3:0:3}, $4)"
+  info "[get_azure_access_token|in] ($1, $2, [redacted], $4)"
 
-  [ -z $1 ] && err "[get_azure_access_token] missing argument TENANT_ID" && exit 1
-  TENANT_ID="$1"
-  [ -z $2 ] && err "[get_azure_access_token] missing argument BIFROST_CLIENT_ID" && exit 1
-  BIFROST_CLIENT_ID="$2"
-  [ -z $3 ] && err "[get_azure_access_token] missing argument APP_REG_CLIENT_SECRET" && exit 1
-  BIFROST_CLIENT_SECRET="$3"
-  [ -z $4 ] && err "[get_azure_access_token] missing argument SCOPE" && exit 1
-  SCOPE="$4"
+  local tenant_id="$1"
+  local client_id="$2"
+  local client_secret="$3"
+  local scope="$4"
+  [ -z "$tenant_id" ] && err "[get_azure_access_token] missing argument TENANT_ID" && return 1
+  [ -z "$client_id" ] && err "[get_azure_access_token] missing argument CLIENT_ID" && return 1
+  [ -z "$client_secret" ] && err "[get_azure_access_token] missing argument CLIENT_SECRET" && return 1
+  [ -z "$scope" ] && err "[get_azure_access_token] missing argument SCOPE" && return 1
 
-
-  local azure_token_api=https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token
-
-  local response=$(curl -s -X POST "${azure_token_api}" -H "Content-Type: application/x-www-form-urlencoded" \
+  local azure_token_api="https://login.microsoftonline.com/${tenant_id}/oauth2/v2.0/token"
+  local response
+  response=$(curl -fsS -X POST "$azure_token_api" -H "Content-Type: application/x-www-form-urlencoded" \
       --data-urlencode "grant_type=client_credentials" \
-      --data-urlencode "client_id=${BIFROST_CLIENT_ID}" \
-      --data-urlencode "client_secret=${BIFROST_CLIENT_SECRET}" \
-      --data-urlencode "scope=${SCOPE}" )
-  result="$?"
-  access_token=$(echo "$response" | jq -r '.access_token')
-  add_entry_to_secrets "AZURE_ACCESS_TOKEN" "$access_token"
+      --data-urlencode "client_id=${client_id}" \
+      --data-urlencode "client_secret=${client_secret}" \
+      --data-urlencode "scope=${scope}") || {
+    err "[get_azure_access_token] token request failed"
+    return 1
+  }
 
-  [ "$result" -ne "0" ] && err "[get_azure_access_token|out]  => ${result}" && exit 1
-  info "[get_azure_access_token|out] => ${access_token}"
+  local access_token
+  access_token=$(printf '%s' "$response" | jq -er '.access_token | strings | select(length > 0)') || {
+    err "[get_azure_access_token] response contains no access token"
+    return 1
+  }
+  add_entry_to_secrets "AZURE_ACCESS_TOKEN" "$access_token" || {
+    err "[get_azure_access_token] failed to add token to secrets file"
+    return 1
+  }
+  info "[get_azure_access_token|out] token stored"
 }
 
 ##########################################
@@ -449,16 +476,16 @@ verify_prereqs(){
 
 ############################
 #   name: verify_env
-#   purpose: verifies that all required environment variable names are provided as non-empty arguments
-#   parameters: $@ (one or more environment variable names to verify are non-empty)
-#   returns: 0 if all names are non-empty, 1 on first empty name
+#   purpose: verifies that each named environment variable has a non-empty value
+#   parameters: $@ (one or more environment variable names)
+#   returns: 0 if all values are non-empty, 1 if any variable is unset or empty
 ############################
 verify_env(){
   info "[verify_env] ..."
   for arg in "$@"
   do
       debug "[verify_env] ... checking $arg"
-      if [ -z "${!arg}" ]; then err "[verify_env] please define env var: $arg" && exit 1; fi
+      if [ -z "${!arg}" ]; then err "[verify_env] please define env var: $arg" && return 1; fi
   done
   info "[verify_env] ...done."
 }
@@ -471,7 +498,7 @@ verify_env(){
 ############################
 package(){
   info "[package] ..."
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
 
   tar cjpvf "$TAR_NAME" "$INCLUDE_FILE"
@@ -479,36 +506,6 @@ package(){
 
   cd "$_pwd"
   info "[package] ...done."
-}
-
-############################
-#   name: create_from_template_and_envvars
-#   purpose: renders a template file by substituting named environment variables using sed, writing the result to a destination file
-#   parameters: $1 (template file path), $2 (destination file path), $3+ (names of environment variables to substitute)
-#   returns: 0 on success, 1 if fewer than 3 arguments are provided or sed fails
-############################
-create_from_template_and_envvars() {
-  info "[create_from_template_and_envvars] ...( $@ )"
-  local usage_msg=$'create_from_template_and_envvars: creates a file from a template substituting env vars:\nusage:\n    create_from_template_and_envvars TEMPLATE DESTINATION [ENVVARS...]'
-
-  if [ -z "$3" ] ; then echo "$usage_msg" && return 1; fi
-
-  local template="$1"
-  local destination="$2"
-  local vars="${@:3}"
-
-  local expression=""
-  for var in $vars
-  do
-    eval val=\${"$var"}
-    #echo "$var: $val"
-    expression="${expression}s/${var}/${val}/g;"
-  done
-
-  #echo "expression: $expression"
-  sed "${expression}" "$template" > "$destination"
-  if [ ! "$?" -eq "0" ]; then err "[create_from_template_and_envvars] sed command was not successful" && return 1; fi
-  info "[create_from_template_and_envvars] ...done."
 }
 
 ############################
@@ -521,13 +518,17 @@ create_from_template_and_envvars() {
 ############################
 add_entry_to_file()
 {
-  info "[add_entry_to_file|in] ($1, $2, ${3:0:5})"
+  info "[add_entry_to_file|in] ($1, $2, [redacted])"
   [ -z "$2" ] && err "no parameters provided" && return 1
   local file="$1"
   local file_path="${this_folder}/${file}"
   local var_name="$2"
   local var_value="$3"
 
+  [ -z "$file" ] && err "[add_entry_to_file] no file provided" && return 1
+  if [ ! -f "$file_path" ]; then
+    touch "$file_path"
+  fi
   if [ -f "$file_path" ]; then
     if [[ "$OSTYPE" == "darwin"* ]]; then
       sed -i '' "/export $var_name=/d" "$file_path"
@@ -584,7 +585,7 @@ add_entry_to_local_variables()
 ############################
 add_entry_to_secrets()
 {
-  info "[add_entry_to_secrets|in] ($1, ${2:0:7})"
+  info "[add_entry_to_secrets|in] ($1, [redacted])"
   [ -z "$1" ] && err "no parameters provided" && return 1
 
   target_file="${FILE_SECRETS}"
@@ -603,14 +604,14 @@ git_tag_and_push()
 {
   info "[git_tag_and_push|in] ($1, ${2:0:7})"
 
-  [ -z "$1" ] && err "must provide parameter VERSION" && exit 1
+  [ -z "$1" ] && err "must provide parameter VERSION" && return 1
   local VERSION="$1"
-  [ -z "$2" ] && err "must provide parameter COMMIT_HASH" && exit 1
+  [ -z "$2" ] && err "must provide parameter COMMIT_HASH" && return 1
   local COMMIT_HASH="$2"
 
   git tag -a "$VERSION" "$COMMIT_HASH" -m "release $VERSION" && git push --tags
   result="$?"
-  [ "$result" -ne "0" ] && err "[git_tag_and_push|out] could not tag and push" && exit 1
+  [ "$result" -ne "0" ] && err "[git_tag_and_push|out] could not tag and push" && return 1
 
   info "[git_tag_and_push|out] => ${result}"
 }
@@ -633,7 +634,7 @@ git_tag_and_push_auto_uv()
   git tag -a "$version" "$commit_hash" -m "release $version" && git push --tags
   result="$?"
   
-  [ "$result" -ne "0" ] && err "[git_tag_and_push|out] could not tag and push" && exit 1
+  [ "$result" -ne "0" ] && err "[git_tag_and_push|out] could not tag and push" && return 1
 
   info "[git_tag_and_push_auto_uv|out] => ${result}"
 }
@@ -650,7 +651,7 @@ get_latest_tag() {
   latest_tag="$(git describe --tags --abbrev=0 2>/dev/null)"
   if [ -z "$latest_tag" ]; then
     err "[get_latest_tag|out] => 1 (no tags found)" >&2
-    exit 1
+    return 1
   fi
 
   echo "$latest_tag"
@@ -672,14 +673,14 @@ changelog(){
   [ ! -z $1 ] && FILE="$1"
   info "[changelog] creating file: $FILE"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
 
   git log --pretty=format:"- %h %as %d %s" > "$FILE"
   result="$?"
 
   cd "$_pwd"
-  [ "$result" -ne "0" ] && err "[changelog|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[changelog|out]  => ${result}" && return 1
   echo "[changelog|out] => $result"
 }
 
@@ -707,25 +708,27 @@ proj_code_transfer(){
   # export CODE_TRANSFER_IMPORT_REPLACEMENT_ORIGIN="ssds_qsd_dataops."
   # export CODE_TRANSFER_IMPORT_REPLACEMENT_TARGET="tgedr.dataops."
 
-  [ -z $1 ] && err "[proj_code_transfer] missing argument TMP_FOLDER" && exit 1
+  [ -z $1 ] && err "[proj_code_transfer] missing argument TMP_FOLDER" && return 1
   local TMP_FOLDER="$1"
-  [ -z $2 ] && err "[proj_code_transfer] missing argument CODE_TRANSFER_FOLDERS" && exit 1
+  [ -z $2 ] && err "[proj_code_transfer] missing argument CODE_TRANSFER_FOLDERS" && return 1
   local CODE_TRANSFER_FOLDERS="$2"
-  [ -z $3 ] && err "[proj_code_transfer] missing argument CODE_TRANSFER_PATH_REPLACEMENT_ORIGIN" && exit 1
+  [ -z $3 ] && err "[proj_code_transfer] missing argument CODE_TRANSFER_PATH_REPLACEMENT_ORIGIN" && return 1
   local CODE_TRANSFER_PATH_REPLACEMENT_ORIGIN="$3"
-  [ -z $4 ] && err "[proj_code_transfer] missing argument CODE_TRANSFER_PATH_REPLACEMENT_TARGET" && exit 1
+  [ -z $4 ] && err "[proj_code_transfer] missing argument CODE_TRANSFER_PATH_REPLACEMENT_TARGET" && return 1
   local CODE_TRANSFER_PATH_REPLACEMENT_TARGET="$4"
-  [ -z $5 ] && err "[proj_code_transfer] missing argument CODE_TRANSFER_IMPORT_REPLACEMENT_ORIGIN" && exit 1
+  [ -z $5 ] && err "[proj_code_transfer] missing argument CODE_TRANSFER_IMPORT_REPLACEMENT_ORIGIN" && return 1
   local CODE_TRANSFER_IMPORT_REPLACEMENT_ORIGIN="$5"
-  [ -z $6 ] && err "[proj_code_transfer] missing argument CODE_TRANSFER_IMPORT_REPLACEMENT_TARGET" && exit 1
+  [ -z $6 ] && err "[proj_code_transfer] missing argument CODE_TRANSFER_IMPORT_REPLACEMENT_TARGET" && return 1
   local CODE_TRANSFER_IMPORT_REPLACEMENT_TARGET="$6"
+  local -a source_folders
+  read -r -a source_folders <<< "$CODE_TRANSFER_FOLDERS"
 
-   _pwd=`pwd`
+   local _pwd=$(pwd)
   cd "$this_folder"
 
   [[ ! -d "$TMP_FOLDER" ]] && mkdir -p "$TMP_FOLDER"
 
-  for item in "${CODE_TRANSFER_FOLDERS[@]}"; do
+  for item in "${source_folders[@]}"; do
     info "[proj_code_transfer] checking: $item"
     find ./$item -type f | while read -r filepath; do
 
@@ -744,7 +747,7 @@ proj_code_transfer(){
   local result="$?"
   cd "$_pwd"
   local msg="[proj_code_transfer|out] => ${result}"
-  [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
   info "$msg"
 }
 
@@ -752,25 +755,26 @@ proj_code_transfer(){
 #   name: add_pypi_config
 #   purpose: creates ~/.pypirc with a token-based PyPI auth entry if the file does not already exist
 #   parameters: $1 (PyPI API token)
+#   returns: 0 on success, nonzero if the file cannot be created or secured
+#   side-effects: creates or changes permissions on ~/.pypirc
 ############################
 
 add_pypi_config(){
-  info "[add_pypi_config] ..."
+  info "[add_pypi_config|in]"
 
-  [ -z $1 ] && err "[add_pypi_config] missing argument PYPI_TOKEN" && exit 1
+  [ -z $1 ] && err "[add_pypi_config] missing argument PYPI_TOKEN" && return 1
   local PYPI_TOKEN="$1"
   
-  _pwd=`pwd`
-  cd ~/
-
-  if [ ! -f ".pypirc" ]; then
+  local pypirc="$HOME/.pypirc"
+  if [ ! -f "$pypirc" ]; then
     info "[add_pypi_config] no '.pypirc' going to create it"
-    echo "[pypi]" > .pypirc
-    echo "username = __token__" >> .pypirc
-    echo "password = $PYPI_TOKEN" >> .pypirc
+    (umask 077; printf '[pypi]\nusername = __token__\npassword = %s\n' "$PYPI_TOKEN" > "$pypirc") || {
+      err "[add_pypi_config] could not create ~/.pypirc"
+      return 1
+    }
   fi
-  cd "$_pwd"
-  info "[add_pypi_config] ...done."
+  chmod 600 "$pypirc" || { err "[add_pypi_config] could not secure ~/.pypirc"; return 1; }
+  info "[add_pypi_config|out]"
 }
 
 ############################
@@ -787,10 +791,10 @@ assert_uv_config(){
   which uv 1>/dev/null
   if [ "$?" -ne "0" ]; then 
     curl -LsSf https://astral.sh/uv/install.sh | sh
-    [ "$?" -ne "0" ] && err "[assert_uv_config|out] failed" && exit 1
+    [ "$?" -ne "0" ] && err "[assert_uv_config|out] failed" && return 1
   fi
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
   if [ ! -f "$this_folder/pyproject.toml" ]; then
     uv init
@@ -803,7 +807,7 @@ assert_uv_config(){
   fi
   cd "$_pwd"
 
-  [ "$result" -ne "0" ] && err "[assert_uv_config|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[assert_uv_config|out]  => ${result}" && return 1
   info "[assert_uv_config|out]"
 }
 
@@ -823,8 +827,6 @@ print_uuid(){
   echo "[print_uuid|out]"
 }
 
-
-
 ############################
 #   name: collect_dot_git
 #   purpose: archives the .git directory of the project into a compressed tar archive
@@ -833,7 +835,7 @@ print_uuid(){
 ############################
 collect_dot_git(){
   info "[collect_dot_git|in] ($1)"
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
 
   local OUTPUT_FILE="${1:-git.tar.gz}"
@@ -842,7 +844,7 @@ collect_dot_git(){
 
   cd "$_pwd"
   local msg="[collect_dot_git|out] => ${result}"
-  [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
   info "$msg"
 }
 
@@ -861,10 +863,10 @@ create_release_documentation(){
   local TARGET_DIR="$4"
 
   if [ -z "$GIT_TAR" ] || [ -z "$PRS_PDF" ] || [ -z "$QA_PDF" ] || [ -z "$TARGET_DIR" ]; then
-    err "[create_release_documentation] missing required arguments: GIT_TAR, PRS_PDF, QA_PDF, TARGET_DIR" && exit 1
+    err "[create_release_documentation] missing required arguments: GIT_TAR, PRS_PDF, QA_PDF, TARGET_DIR" && return 1
   fi
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
 
   rm -f $TARGET_DIR
@@ -878,7 +880,7 @@ create_release_documentation(){
   cd "$_pwd"
 
   local msg="[create_release_documentation|out] => ${result}"
-  [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
   info "$msg"
 }
 
@@ -924,7 +926,7 @@ generate_pr_approvals_md() {
   local output_file="$3"
 
   if [ -z "$repo" ] || [ -z "$branch" ] || [ -z "$output_file" ]; then
-    err "[generate_pr_approvals_md] missing required arguments: repo, branch, output_file" && exit 1
+    err "[generate_pr_approvals_md] missing required arguments: repo, branch, output_file" && return 1
   fi
 
   uv run python -c "from tgedr_pycommons.cicd.pr_report_generator import generate_pr_approvals_md; generate_pr_approvals_md('$repo', '$branch', '$output_file')"
@@ -978,7 +980,7 @@ cdk_global_reqs(){
    "@aws-cdk/integ-runner@${INTEG_RUNNER_VERSION}" "@aws-cdk/integ-tests-alpha@${INTEG_TESTS_ALPHA_VERSION}" \
    "jest@${JEST_VERSION}"
   result="$?"
-  [ "$result" -ne "0" ] && err "[cdk_global_reqs|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[cdk_global_reqs|out]  => ${result}" && return 1
   info "[cdk_global_reqs|out] => ${result}"
 }
 
@@ -992,17 +994,17 @@ cdk_global_reqs(){
 cdk_scaffolding(){
   info "[cdk_scaffolding|in] ($1)"
 
-  [ -z $1 ] && err "[cdk_scaffolding] missing argument INFRA_DIR" && exit 1
+  [ -z $1 ] && err "[cdk_scaffolding] missing argument INFRA_DIR" && return 1
   local INFRA_DIR="$1"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$INFRA_DIR"
 
   cdk init app --language typescript
 
   result="$?"
   cd "$_pwd"
-  [ "$result" -ne "0" ] && err "[cdk_scaffolding|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[cdk_scaffolding|out]  => ${result}" && return 1
   info "[cdk_scaffolding|out] => ${result}"
 }
 
@@ -1037,7 +1039,7 @@ cdk_infra_bootstrap(){
     "$INTEG_TESTS_ALPHA_VERSION" "$JEST_VERSION"  && cdk_scaffolding "$INFRA_DIR"
 
   result="$?"
-  [ "$result" -ne "0" ] && err "[cdk_infra_bootstrap|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[cdk_infra_bootstrap|out]  => ${result}" && return 1
   info "[cdk_infra_bootstrap|out] => ${result}"
 }
 
@@ -1080,20 +1082,20 @@ cdk_infra()
     local stacks="--all"
   fi
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$tf_dir"
 
   if [ "$operation" == "on" ]; then
     cdk synth "$stacks"
-    [ "$?" -ne "0" ] && err "[infra] couldn't synth" && cd "$_pwd" && exit 1
+    [ "$?" -ne "0" ] && err "[infra] couldn't synth" && cd "$_pwd" && return 1
     cdk deploy "$stacks" --require-approval=never -v --debug
-    [ "$?" -ne "0" ] && err "[infra] couldn't deploy" && cd "$_pwd" && exit 1
+    [ "$?" -ne "0" ] && err "[infra] couldn't deploy" && cd "$_pwd" && return 1
   elif [ "$operation" == "off" ]; then
     cdk destroy "$stacks" --force
-    [ "$?" -ne "0" ] && err "[infra] couldn't destroy" && cd "$_pwd" && exit 1
+    [ "$?" -ne "0" ] && err "[infra] couldn't destroy" && cd "$_pwd" && return 1
   elif [ "$operation" == "bootstrap" ]; then
     cdk bootstrap --force --termination-protection false
-    [ "$?" -ne "0" ] && err "[infra] couldn't bootstrap" && cd "$_pwd" && exit 1
+    [ "$?" -ne "0" ] && err "[infra] couldn't bootstrap" && cd "$_pwd" && return 1
   fi
 
   cd "$_pwd"
@@ -1118,12 +1120,12 @@ cdk_setup()
     else
       info "[cdk_setup] assuming default infra folder: ${DEFAULT_INFRA_DIR}"
     fi
-    _pwd=`pwd`
+    local _pwd=$(pwd)
     cd "$tf_dir"
     npm install
     result="$?"
     cd "$_pwd"
-    [ "$result" -ne "0" ] && err "[cdk_setup|out]  => ${result}" && exit 1
+    [ "$result" -ne "0" ] && err "[cdk_setup|out]  => ${result}" && return 1
     info "[cdk_setup|out] => ${result}"
 }
 
@@ -1202,15 +1204,15 @@ databricks_set_cli_access()
 databricks_bundle_deploy(){
   info "[databricks_bundle_deploy|in]"
 
-  [ -z $1 ] && err "[databricks_bundle_deploy] missing argument BUNDLE_FOLDER" && exit 1
+  [ -z $1 ] && err "[databricks_bundle_deploy] missing argument BUNDLE_FOLDER" && return 1
   local BUNDLE_FOLDER="$1"
   local BUNDLE_TARGET="local"
   [ ! -z $2 ] && BUNDLE_TARGET="$2"
 
-  [ "main" != "$BUNDLE_TARGET" ] && [ "local" != "$BUNDLE_TARGET" ] && err "[databricks_bundle_deploy] wrong argument BUNDLE_TARGET: $BUNDLE_TARGET" && exit 1
+  [ "main" != "$BUNDLE_TARGET" ] && [ "local" != "$BUNDLE_TARGET" ] && err "[databricks_bundle_deploy] wrong argument BUNDLE_TARGET: $BUNDLE_TARGET" && return 1
   info "[databricks_bundle_deploy] BUNDLE_FOLDER: $BUNDLE_FOLDER   BUNDLE_TARGET: $BUNDLE_TARGET"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$BUNDLE_FOLDER"
 
   databricks bundle validate --target "$BUNDLE_TARGET" --debug && \
@@ -1218,7 +1220,7 @@ databricks_bundle_deploy(){
 
   result="$?"
   cd "$_pwd"
-  [ "$result" -ne "0" ] && err "[databricks_bundle_deploy|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[databricks_bundle_deploy|out]  => ${result}" && return 1
   info "[databricks_bundle_deploy|out] => ${result}"
 }
 
@@ -1232,22 +1234,22 @@ databricks_bundle_deploy(){
 databricks_bundle_destroy(){
   info "[databricks_bundle_destroy|in]"
 
-  [ -z $1 ] && err "[databricks_bundle_destroy] missing argument BUNDLE_FOLDER" && exit 1
+  [ -z $1 ] && err "[databricks_bundle_destroy] missing argument BUNDLE_FOLDER" && return 1
   local BUNDLE_FOLDER="$1"
   local BUNDLE_TARGET="local"
   [ ! -z $2 ] && BUNDLE_TARGET="$2"
 
-  [ "main" != "$BUNDLE_TARGET" ] && [ "local" != "$BUNDLE_TARGET" ] && err "[databricks_bundle_destroy] wrong argument BUNDLE_TARGET: $BUNDLE_TARGET" && exit 1
+  [ "main" != "$BUNDLE_TARGET" ] && [ "local" != "$BUNDLE_TARGET" ] && err "[databricks_bundle_destroy] wrong argument BUNDLE_TARGET: $BUNDLE_TARGET" && return 1
   info "[databricks_bundle_destroy] BUNDLE_FOLDER: $BUNDLE_FOLDER   BUNDLE_TARGET: $BUNDLE_TARGET"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$BUNDLE_FOLDER"
 
   databricks bundle destroy --target "$BUNDLE_TARGET" --auto-approve --force-lock --debug
 
   result="$?"
   cd "$_pwd"
-  [ "$result" -ne "0" ] && err "[databricks_bundle_destroy|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[databricks_bundle_destroy|out]  => ${result}" && return 1
   info "[databricks_bundle_destroy|out] => ${result}"
 }
 
@@ -1261,15 +1263,15 @@ databricks_bundle_destroy(){
 databricks_delete_secret(){
   info "[databricks_delete_secret|in] ($1, $2)"
 
-  [ -z $1 ] && err "[databricks_delete_secret] missing argument SECRET_KEY" && exit 1
+  [ -z $1 ] && err "[databricks_delete_secret] missing argument SECRET_KEY" && return 1
   local SECRET_KEY="$1"
-  [ -z $2 ] && err "[databricks_delete_secret] missing argument SECRET_SCOPE" && exit 1
+  [ -z $2 ] && err "[databricks_delete_secret] missing argument SECRET_SCOPE" && return 1
   local SECRET_SCOPE="$2"
 
   databricks secrets delete-secret $SECRET_SCOPE $SECRET_KEY
   result="$?"
 
-  [ "$result" -ne "0" ] && err "[databricks_delete_secret|out] could not delete the secret" && exit 1
+  [ "$result" -ne "0" ] && err "[databricks_delete_secret|out] could not delete the secret" && return 1
   info "[databricks_delete_secret|out] => ${result}"
 }
 
@@ -1283,11 +1285,11 @@ databricks_delete_secret(){
 databricks_set_secret(){
   info "[databricks_set_secret|in] ($1, $2, ${3:0:3})"
 
-  [ -z $1 ] && err "[databricks_set_secret] missing argument SECRET_KEY" && exit 1
+  [ -z $1 ] && err "[databricks_set_secret] missing argument SECRET_KEY" && return 1
   local SECRET_KEY="$1"
-  [ -z $2 ] && err "[databricks_set_secret] missing argument SECRET_SCOPE" && exit 1
+  [ -z $2 ] && err "[databricks_set_secret] missing argument SECRET_SCOPE" && return 1
   local SECRET_SCOPE="$2"
-  [ -z $3 ] && err "[databricks_set_secret] missing argument SECRET_VALUE" && exit 1
+  [ -z $3 ] && err "[databricks_set_secret] missing argument SECRET_VALUE" && return 1
   local SECRET_VALUE="$3"
 
   query=$(databricks secrets get-secret $SECRET_SCOPE $SECRET_KEY)
@@ -1298,7 +1300,7 @@ databricks_set_secret(){
     warn "[databricks_set_secret] secret is already there"
   fi
   result="$?"
-  [ "$result" -ne "0" ] && err "[databricks_set_secret|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[databricks_set_secret|out]  => ${result}" && return 1
   info "[databricks_set_secret|out] => ${result}"
 }
 
@@ -1314,13 +1316,13 @@ databricks_set_secret(){
 get_azure_artifact(){
   info "[get_azure_artifact|in] ($1, $2, $3, $4, $5)"
 
-  [ -z "$1" ] && err "[get_azure_artifact] missing argument ORGANIZATION" && exit 1
+  [ -z "$1" ] && err "[get_azure_artifact] missing argument ORGANIZATION" && return 1
   local ORGANIZATION="$1"
-  [ -z "$2" ] && err "[get_azure_artifact] missing argument FEED" && exit 1
+  [ -z "$2" ] && err "[get_azure_artifact] missing argument FEED" && return 1
   local FEED="$2"
-  [ -z "$3" ] && err "[get_azure_artifact] missing argument NAME" && exit 1
+  [ -z "$3" ] && err "[get_azure_artifact] missing argument NAME" && return 1
   local NAME="$3"
-  [ -z "$4" ] && err "[get_azure_artifact] missing argument VERSION" && exit 1
+  [ -z "$4" ] && err "[get_azure_artifact] missing argument VERSION" && return 1
   local VERSION="$4"
 
   local TARGET="."
@@ -1330,7 +1332,7 @@ get_azure_artifact(){
   az artifacts universal download --organization "$ORGANIZATION" --feed "$FEED" --name "$NAME" --version "$VERSION" --path "$TARGET"
   result="$?"
 
-  [ "$result" -ne "0" ] && err "[get_azure_artifact|out] => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[get_azure_artifact|out] => ${result}" && return 1
   info "[get_azure_artifact|out] => ${result}"
 }
 
@@ -1347,17 +1349,17 @@ get_azure_artifact(){
 npm_deps(){
   info "[npm_deps|in] ($1)"
 
-  [ -z $1 ] && err "[npm_deps] missing argument INFRA_DIR" && exit 1
+  [ -z $1 ] && err "[npm_deps] missing argument INFRA_DIR" && return 1
   local INFRA_DIR="$1"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$INFRA_DIR"
 
   npm install
 
   result="$?"
   cd "$_pwd"
-  [ "$result" -ne "0" ] && err "[npm_deps|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[npm_deps|out]  => ${result}" && return 1
   info "[npm_deps|out] => ${result}"
 }
 
@@ -1378,7 +1380,7 @@ npm_publish(){
   [ -z $3 ] && err "[npm_publish] missing argument FOLDER" && return 1
   local folder="$3"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$folder"
   npm config set "//${registry}/:_authToken" "${token}"
   npm publish . --access="public"
@@ -1400,9 +1402,9 @@ npm_publish(){
 python_add_pip_index_to_requirements(){
   info "[python_add_pip_index_to_requirements|in] ($1, $2)"
 
-  [ -z $1 ] && err "[python_add_pip_index_to_requirements] missing argument EXTRA_INDEX_URL" && exit 1
+  [ -z $1 ] && err "[python_add_pip_index_to_requirements] missing argument EXTRA_INDEX_URL" && return 1
   local EXTRA_INDEX_URL="$1"
-  [ -z $2 ] && err "[python_add_pip_index_to_requirements] missing argument REQS_FILE" && exit 1
+  [ -z $2 ] && err "[python_add_pip_index_to_requirements] missing argument REQS_FILE" && return 1
   local REQS_FILE="$2"
   local OLD_REQS_FILE="${REQS_FILE}_old"
 
@@ -1411,7 +1413,7 @@ python_add_pip_index_to_requirements(){
   cat "$OLD_REQS_FILE" >> "$REQS_FILE"
   result="$?"
 
-  [ "$result" -ne "0" ] && err "[python_add_pip_index_to_requirements|out] could not add the line" && exit 1
+  [ "$result" -ne "0" ] && err "[python_add_pip_index_to_requirements|out] could not add the line" && return 1
   info "[python_add_pip_index_to_requirements|out] => ${result}"
 }
 
@@ -1425,12 +1427,12 @@ python_add_pip_index_to_requirements(){
 python_build(){
   info "[python_build] ..."
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
 
   rm -rf dist
   python3 -m build -n
-  [ "$?" -ne "0" ] && err "[python_build] ooppss" && exit 1
+  [ "$?" -ne "0" ] && err "[python_build] ooppss" && cd "$_pwd" && return 1
 
   cd "$_pwd"
   echo "[python_build] ...done."
@@ -1451,11 +1453,11 @@ python_pypi_publish(){
   user="$1"
   token="$2"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
 
   twine upload -u $user -p $token dist/*
-  [ "$?" -ne "0" ] && err "[python_pypi_publish] ooppss" && exit 1
+  [ "$?" -ne "0" ] && err "[python_pypi_publish] ooppss" && cd "$_pwd" && return 1
 
   cd "$_pwd"
   echo "[python_pypi_publish|out]"
@@ -1475,7 +1477,7 @@ python_twine_publish(){
   user="$1"
   pswd="$2"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
 
   if [ ! -z "$3" ]; then
@@ -1487,7 +1489,7 @@ python_twine_publish(){
 
   result=$?
   cd "$_pwd"
-  [ "$result" -ne "0" ] && err "[python_twine_publish|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[python_twine_publish|out]  => ${result}" && return 1
   info "[python_twine_publish|out] => ${result}"
 }
 
@@ -1523,7 +1525,7 @@ python_code_lint()
       return_value=$?
       info "[python_code_lint] ... black...$return_value"
     fi
-    [ "$return_value" -ne "0" ] && exit 1
+    [ "$return_value" -ne "0" ] && return 1
     info "[python_code_lint|out] => ${return_value}"
     return ${return_value}
 }
@@ -1582,7 +1584,7 @@ python_code_check()
       info "[python_code_check] ... bandit...$return_value"
     fi
    
-    [ "$return_value" -ne "0" ] && exit 1
+    [ "$return_value" -ne "0" ] && return 1
     info "[python_code_check|out] => ${return_value}"
     return ${return_value}
 }
@@ -1599,14 +1601,14 @@ python_print_coverage()
   info "[python_print_coverage|in]"
   coverage report -m
   result="$?"
-  [ "$result" -ne "0" ] && exit 1
+  [ "$result" -ne "0" ] && return 1
   info "[python_print_coverage|out] => $result"
   return ${result}
 }
 
 ############################
 #   name: python_check_coverage
-#   purpose: asserts that the total test coverage percentage meets a minimum threshold; exits with error if below
+#   purpose: asserts that the total test coverage percentage meets a minimum threshold; returns with error if below
 #   parameters: $1 (minimum coverage percentage, integer, e.g. 80)
 #   requires: coverage (with a .coverage data file already generated)
 ############################
@@ -1615,17 +1617,91 @@ python_check_coverage()
 {
   info "[python_check_coverage|in] ($1)"
 
-  [ -z "$1" ] && usage
+  [ -z "$1" ] && err "[python_check_coverage] missing argument THRESHOLD" && return 1
 
-  local threshold=$1
-  score=$(coverage report | awk '$1 == "TOTAL" {print $NF+0}')
-   result="$?"
-  [ "$result" -ne "0" ] && exit 1
+  local threshold
+  threshold=$1
+  local coverage_report
+  local score
+  local result
+
+  coverage_report=$(coverage report)
+  result="$?"
+  [ "$result" -ne "0" ] && return 1
+  score=$(echo "$coverage_report" | awk '$1 == "TOTAL" {print $NF+0}')
+  result="$?"
+  [ "$result" -ne "0" ] && return 1
   if (( $threshold > $score )); then
     err "[python_check_coverage] $score doesn't meet $threshold"
-    exit 1
+    return 1
   fi
   info "[python_check_coverage|out] => $score"
+}
+
+############################
+#   name: python_poetry_check_coverage
+#   purpose: asserts that the total coverage percentage from 'poetry run coverage report' meets a minimum threshold; exits with error if below
+#   parameters: $1 (minimum coverage percentage, integer, e.g. 80)
+#   requires: poetry (with coverage, and a .coverage data file already generated)
+############################
+
+python_poetry_check_coverage()
+{
+  info "[python_poetry_check_coverage|in] ($1)"
+  [ -z "$1" ] && usage
+
+  local threshold
+  threshold=$1
+  local coverage_report
+  local score
+  local result
+
+  coverage_report=$(poetry run coverage report)
+  result="$?"
+  [ "$result" -ne "0" ] && return 1
+  score=$(echo "$coverage_report" | awk '$1 == "TOTAL" {print $NF+0}')
+  result="$?"
+  [ "$result" -ne "0" ] && return 1
+  if (( $threshold > $score )); then
+    err "[python_poetry_check_coverage] $score doesn't meet $threshold"
+    return 1
+  fi
+  info "[python_poetry_check_coverage|out] => $score"
+}
+
+############################
+#   name: test_coverage_check_uv
+#   purpose: asserts that total coverage meets a minimum threshold via uv; generates a coverage badge SVG; returns nonzero if below threshold
+#   parameters: $1 (minimum coverage percentage, integer, e.g. 80)
+#   returns: 0 if the threshold and badge generation succeed, nonzero otherwise
+#   requires: uv (with coverage, genbadge, and a .coverage data file already generated)
+############################
+test_coverage_check_uv()
+{
+  info "[test_coverage_check_uv|in] ($1)"
+  [ -z "$1" ] && usage
+
+  local threshold
+  threshold=$1
+  local coverage_report
+  local score
+  local result
+  coverage_report=$(uv run coverage report)
+  result="$?"
+  [ "$result" -ne "0" ] && return 1
+  score=$(echo "$coverage_report" | awk '$1 == "TOTAL" {print $NF+0}')
+  result="$?"
+  [ "$result" -ne "0" ] && return 1
+  if (( $threshold > $score )); then
+    err "[test_coverage_check_uv] $score doesn't meet $threshold"
+    return 1
+  fi
+  uv run genbadge coverage -i coverage.xml -o coverage.svg || {
+    result=$?
+    err "[test_coverage_check_uv] failed to generate coverage badge"
+    return "$result"
+  }
+  info "[test_coverage_check_uv|out] => $score"
 }
 
 ############################
@@ -1640,7 +1716,7 @@ python_test()
     info "[python_test|in] ($1)"
     python -m pytest -x -s -vv --durations=0 --cov=src --junitxml=tests-results.xml --cov-report=xml --cov-report=html "$1"
     return_value="$?"
-    [ "$return_value" -ne "0" ] && exit 1
+    [ "$return_value" -ne "0" ] && return 1
     info "[python_test|out] => ${return_value}"
     return ${return_value}
 }
@@ -1662,7 +1738,7 @@ python_reqs()
     fi
 
     pip install -r "$REQS_FILE"
-    [ "$?" -ne "0" ] && exit 1
+    [ "$?" -ne "0" ] && return 1
     info "[python_reqs|out]"
 }
 
@@ -1681,12 +1757,12 @@ python_hatch_build(){
     ROOT_DIR="$1"
   fi
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$ROOT_DIR"
 
   rm -rf dist
   hatch build
-  if [ ! "$?" -eq "0" ] ; then echo "[python_hatch_build] could not build" && cd "$_pwd" && exit 1; fi
+  if [ ! "$?" -eq "0" ] ; then echo "[python_hatch_build] could not build" && cd "$_pwd" && return 1; fi
 
   cd "$_pwd"
   echo "[python_hatch_build] ...done."
@@ -1707,11 +1783,11 @@ python_hatch_publish(){
     ROOT_DIR="$1"
   fi
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$ROOT_DIR"
 
   hatch publish -n dist
-  if [ ! "$?" -eq "0" ] ; then echo "[python_hatch_publish] could not publish" && cd "$_pwd" && exit 1; fi
+  if [ ! "$?" -eq "0" ] ; then echo "[python_hatch_publish] could not publish" && cd "$_pwd" && return 1; fi
 
   cd "$_pwd"
   echo "[python_hatch_publish] ...done."
@@ -1726,14 +1802,14 @@ python_hatch_publish(){
 
 build_cookiecutter_template(){
   info "[build_cookiecutter_template|in] ($1)"
-  [[ -z "$1" ]] && err "[build_cookiecutter_template] must provide TEMPLATE_LOCATION folder" && exit 1
+  [[ -z "$1" ]] && err "[build_cookiecutter_template] must provide TEMPLATE_LOCATION folder" && return 1
   local TEMPLATE_LOCATION="$1"
 
-  [[ ! -d "$TEMPLATE_LOCATION" ]] && err "[build_cookiecutter_template] TEMPLATE_LOCATION folder not found" && exit 1
+  [[ ! -d "$TEMPLATE_LOCATION" ]] && err "[build_cookiecutter_template] TEMPLATE_LOCATION folder not found" && return 1
   local TEMPLATE_NAME=$(basename "$TEMPLATE_LOCATION")
   info "[build_cookiecutter_template|in] template name: $TEMPLATE_NAME"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$TEMPLATE_LOCATION/.."
   local zipname="cookiecutter.zip"
   local finalzipfile="$TEMPLATE_LOCATION/$zipname"
@@ -1741,7 +1817,7 @@ build_cookiecutter_template(){
   zip -r "$zipname" "$TEMPLATE_NAME" --quiet && mv $zipname $finalzipfile
   result="$?"
   cd "$_pwd"
-  [ "$result" -ne "0" ] && err "[build_cookiecutter_template|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[build_cookiecutter_template|out]  => ${result}" && return 1
   info "[build_cookiecutter_template|out] => ${result}"
 }
 
@@ -1756,22 +1832,22 @@ build_cookiecutter_template(){
 test_cookiecutter_template(){
   info "[test_cookiecutter_template|in] ($1, $2)"
 
-  [[ -z "$1" ]] && err "[test_cookiecutter_template] must provide TEMPLATE_LOCATION folder" && exit 1
+  [[ -z "$1" ]] && err "[test_cookiecutter_template] must provide TEMPLATE_LOCATION folder" && return 1
   local TEMPLATE_LOCATION="$1"
 
   local TEMPLATE_NAME=$(basename "$TEMPLATE_LOCATION")
   info "[test_cookiecutter_template|in] template name: $TEMPLATE_NAME"
 
-  [[ -z "$2" ]] && err "[test_cookiecutter_template] must provide TEST_LOCATION folder" && exit 1
+  [[ -z "$2" ]] && err "[test_cookiecutter_template] must provide TEST_LOCATION folder" && return 1
   local TEST_LOCATION="$2"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$TEST_LOCATION" && pipx run cookiecutter --no-input "$TEMPLATE_LOCATION"
   result="$?"
   cd "$_pwd"
   info "[test_cookiecutter_template] trying to open vscode on test project: $TEST_LOCATION/$TEMPLATE_NAME"
   code "$TEST_LOCATION/$TEMPLATE_NAME" &
-  [ "$result" -ne "0" ] && err "[test_cookiecutter_template|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[test_cookiecutter_template|out]  => ${result}" && return 1
   info "[test_cookiecutter_template|out] => ${result}"
 }
 
@@ -1784,7 +1860,7 @@ test_cookiecutter_template(){
 
 poetry_reqs(){
   info "[poetry_reqs|in]"
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
 
   poetry install --with dev && poetry run pre-commit install --install-hooks
@@ -1794,7 +1870,7 @@ poetry_reqs(){
   cd "$_pwd"
 
   local msg="[poetry_reqs|out] => ${result}"
-  [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
   info "$msg"
 }
 
@@ -1807,7 +1883,7 @@ poetry_reqs(){
 
 lint_check_ruff(){
   info "[lint_check_ruff|in]"
-  _pwd=`pwd`
+  local _pwd=$(pwd)
 
   cd "$this_folder"
 
@@ -1818,7 +1894,7 @@ lint_check_ruff(){
   cd "$_pwd"
 
   local msg="[lint_check_ruff|out] => ${result}"
-  [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
   info "$msg"
 }
 
@@ -1830,7 +1906,7 @@ lint_check_ruff(){
 ############################
 lint_check_ruff_uv(){
   info "[lint_check_ruff_uv|in]"
-  _pwd=`pwd`
+  local _pwd=$(pwd)
 
   cd "$this_folder"
 
@@ -1841,7 +1917,7 @@ lint_check_ruff_uv(){
   cd "$_pwd"
 
   local msg="[lint_check_ruff_uv|out] => ${result}"
-  [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
   info "$msg"
 }
 
@@ -1855,13 +1931,13 @@ lint_check_ruff_uv(){
 poetry_pytest_unit(){
   info "[poetry_pytest_unit|in] ($1, $2)"
 
-  [[ -z "$1" ]] && err "[poetry_pytest_unit] must provide TEST_FOLDER" && exit 1
+  [[ -z "$1" ]] && err "[poetry_pytest_unit] must provide TEST_FOLDER" && return 1
   local TEST_FOLDER="$1"
   local SRC_FOLDER="$this_folder/src"
   [[ ! -z "$2" ]] && SRC_FOLDER="$2"
 
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
 
   poetry run pytest "$TEST_FOLDER" -x -s -vv --durations=0 \
@@ -1876,7 +1952,7 @@ poetry_pytest_unit(){
   cd "$_pwd"
 
   local msg="[poetry_pytest_unit|out] => ${result}"
-  [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
   info "$msg"
 }
 
@@ -1892,7 +1968,7 @@ pytest_uv(){
   local TEST_DIR="${1:-test}"
   local SRC_DIR="${2:-src}"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
 
   uv run pytest "$TEST_DIR" -x -s -vv --durations=0 \
@@ -1906,7 +1982,7 @@ pytest_uv(){
   cd "$_pwd"
 
   local msg="[pytest_uv|out] => ${result}"
-  [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
   info "$msg"
 }
 
@@ -1920,12 +1996,12 @@ pytest_uv(){
 poetry_pytest_bdd(){
   info "[poetry_pytest_bdd|in] ($1)"
 
-  [[ -z "$1" ]] && err "[poetry_pytest_bdd] must provide TEST_FOLDER" && exit 1
+  [[ -z "$1" ]] && err "[poetry_pytest_bdd] must provide TEST_FOLDER" && return 1
   local TEST_FOLDER="$1"
   local SRC_FOLDER="$this_folder/src"
   [[ ! -z "$2" ]] && SRC_FOLDER="$2"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
   # Clear existing coverage and run BDD tests
   poetry run coverage erase
@@ -1941,7 +2017,7 @@ poetry_pytest_bdd(){
   cd "$_pwd"
 
   local msg="[poetry_pytest_bdd|out] => ${result}"
-  [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
   info "$msg"
 }
 
@@ -1955,14 +2031,12 @@ poetry_pytest_bdd(){
 python_poetry_print_coverage()
 {
   info "[python_poetry_print_coverage|in]"
-  
-  poetry run coverage report --show-missing
-  poetry run coverage html
-  poetry run coverage xml
-  result="$?"
-  [ "$result" -ne "0" ] && exit 1
-  info "[python_poetry_print_coverage|out] => $result"
-  return ${result}
+
+  poetry run coverage report --show-missing || return $?
+  poetry run coverage html || return $?
+  poetry run coverage xml || return $?
+  info "[python_poetry_print_coverage|out] => 0"
+  return 0
 }
 
 ############################
@@ -1974,60 +2048,12 @@ python_poetry_print_coverage()
 test_print_coverage_uv()
 {
   info "[test_print_coverage_uv|in]"
-  
-  uv run coverage report --show-missing
-  uv run coverage html
-  uv run coverage xml
-  result="$?"
-  [ "$result" -ne "0" ] && exit 1
-  info "[test_print_coverage_uv|out] => $result"
-  return ${result}
-}
 
-############################
-#   name: python_poetry_check_coverage
-#   purpose: asserts that the total coverage percentage from 'poetry run coverage report' meets a minimum threshold; exits with error if below
-#   parameters: $1 (minimum coverage percentage, integer, e.g. 80)
-#   requires: poetry (with coverage, and a .coverage data file already generated)
-############################
-
-python_poetry_check_coverage()
-{
-  info "[python_poetry_check_coverage|in] ($1)"
-  [ -z "$1" ] && usage
-
-  local threshold=$1
-  score=$(poetry run coverage report | awk '$1 == "TOTAL" {print $NF+0}')
-  result="$?"
-  [ "$result" -ne "0" ] && exit 1
-  if (( $threshold > $score )); then
-    err "[python_poetry_check_coverage] $score doesn't meet $threshold"
-    exit 1
-  fi
-  info "[python_poetry_check_coverage|out] => $score"
-}
-
-############################
-#   name: test_coverage_check_uv
-#   purpose: asserts that total coverage meets a minimum threshold via uv; generates a coverage badge SVG; exits with error if below threshold
-#   parameters: $1 (minimum coverage percentage, integer, e.g. 80)
-#   requires: uv (with coverage, genbadge, and a .coverage data file already generated)
-############################
-test_coverage_check_uv()
-{
-  info "[test_coverage_check_uv|in] ($1)"
-  [ -z "$1" ] && usage
-
-  local threshold=$1
-  score=$(uv run coverage report | awk '$1 == "TOTAL" {print $NF+0}')
-  result="$?"
-  [ "$result" -ne "0" ] && exit 1
-  if (( $threshold > $score )); then
-    err "[test_coverage_check_uv] $score doesn't meet $threshold"
-    exit 1
-  fi
-  uv run genbadge coverage -i coverage.xml -o coverage.svg
-  info "[test_coverage_check_uv|out] => $score"
+  uv run coverage report --show-missing || return $?
+  uv run coverage html || return $?
+  uv run coverage xml || return $?
+  info "[test_print_coverage_uv|out] => 0"
+  return 0
 }
 
 ############################
@@ -2039,7 +2065,7 @@ test_coverage_check_uv()
 
 poetry_build(){
   info "[poetry_build|in]"
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
   changelog
   rm -rf dist/*
@@ -2049,7 +2075,7 @@ poetry_build(){
 
   cd "$_pwd"
   local msg="[poetry_build|out] => ${result}"
-  [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
   info "$msg"
 }
 
@@ -2062,7 +2088,7 @@ poetry_build(){
 build_uv(){
   info "[build_uv|in]"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
   # changelog
   rm -rf dist/*
@@ -2072,7 +2098,7 @@ build_uv(){
 
   cd "$_pwd"
   local msg="[build_uv|out] => ${result}"
-  [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
   info "$msg"
 }
 
@@ -2086,16 +2112,16 @@ build_uv(){
 poetry_publish_az(){
   info "[poetry_publish_az|in]"
 
-  [ -z $1 ] && err "[poetry_publish_az] missing argument REPO_URL" && exit 1
+  [ -z $1 ] && err "[poetry_publish_az] missing argument REPO_URL" && return 1
   local REPO_URL="$1"
-  [ -z $2 ] && err "[poetry_publish_az] missing argument REPO_NAME" && exit 1
+  [ -z $2 ] && err "[poetry_publish_az] missing argument REPO_NAME" && return 1
   local REPO_NAME="$2"
-  [ -z $3 ] && err "[poetry_publish_az] missing argument REPO_USER" && exit 1
+  [ -z $3 ] && err "[poetry_publish_az] missing argument REPO_USER" && return 1
   local REPO_USER="$3"
-  [ -z $4 ] && err "[poetry_publish_az] missing argument REPO_PSWD" && exit 1
+  [ -z $4 ] && err "[poetry_publish_az] missing argument REPO_PSWD" && return 1
   local REPO_PSWD="$4"
   
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
 
   poetry config "repositories.${REPO_NAME}" "$REPO_URL"
@@ -2106,7 +2132,7 @@ poetry_publish_az(){
 
   cd "$_pwd"
   local msg="[poetry_publish_az|out] => ${result}"
-  [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
   info "$msg"
 }
 
@@ -2119,10 +2145,10 @@ poetry_publish_az(){
 publish_pypi_uv(){
   info "[publish_pypi_uv|in] (${1:0:7})"
 
-  [ -z $1 ] && err "[publish_pypi_uv] missing argument PYPI_TOKEN" && exit 1
+  [ -z $1 ] && err "[publish_pypi_uv] missing argument PYPI_TOKEN" && return 1
   local PYPI_TOKEN="$1"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
 
   uv publish --token "$PYPI_TOKEN"
@@ -2131,7 +2157,7 @@ publish_pypi_uv(){
 
   cd "$_pwd"
   local msg="[publish_pypi_uv|out] => ${result}"
-  [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
   info "$msg"
 }
 
@@ -2143,18 +2169,19 @@ publish_pypi_uv(){
 ############################
 
 poetry_add_supplemental_source_repo(){
-  info "[poetry_add_supplemental_source_repo|in]"
-  _pwd=`pwd`
-  cd "$this_folder"
+  info "[poetry_add_supplemental_source_repo|in] ($1, $2, $3, $4)"
+  local _pwd=$(pwd)
 
-  [ -z $1 ] && err "[poetry_add_supplemental_source_repo] missing argument REPO_NAME" && exit 1
+  [ -z $1 ] && err "[poetry_add_supplemental_source_repo] missing argument REPO_NAME" && return 1
   local REPO_NAME="$1"
-  [ -z $2 ] && err "[poetry_add_supplemental_source_repo] missing argument REPO_URL" && exit 1
+  [ -z $2 ] && err "[poetry_add_supplemental_source_repo] missing argument REPO_URL" && return 1
   local REPO_URL="$2"
-  [ -z $3 ] && err "[poetry_add_supplemental_source_repo] missing argument REPO_USR" && exit 1
+  [ -z $3 ] && err "[poetry_add_supplemental_source_repo] missing argument REPO_USR" && return 1
   local REPO_USR="$3"
-  [ -z $4 ] && err "[poetry_add_supplemental_source_repo] missing argument REPO_TOKEN" && exit 1
+  [ -z $4 ] && err "[poetry_add_supplemental_source_repo] missing argument REPO_TOKEN" && return 1
   local REPO_TOKEN="$4"
+
+  cd "$this_folder"
 
   poetry source add --priority=supplemental "$REPO_NAME" "$REPO_URL" && \
     poetry config "http-basic.${REPO_NAME}" "$REPO_USR" "$REPO_TOKEN"
@@ -2162,7 +2189,7 @@ poetry_add_supplemental_source_repo(){
 
   cd "$_pwd"
   local msg="[poetry_add_supplemental_source_repo|out] => ${result}"
-  [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
   info "$msg"
 }
 
@@ -2175,9 +2202,9 @@ poetry_add_supplemental_source_repo(){
 
 sca_check_safety(){
   info "[sca_check_safety|in] (${1:0:3})"
-  _pwd=`pwd`
+  local _pwd=$(pwd)
 
-  [ -z $1 ] && err "[sca_check_safety] missing argument SAFETY_KEY" && exit 1
+  [ -z $1 ] && err "[sca_check_safety] missing argument SAFETY_KEY" && return 1
   local SAFETY_KEY="$1"
 
   cd "$this_folder"
@@ -2189,7 +2216,7 @@ sca_check_safety(){
   cd "$_pwd"
 
   local msg="[sca_check_safety|out] => ${result}"
-  [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
   info "$msg"
 }
 
@@ -2201,9 +2228,9 @@ sca_check_safety(){
 ############################
 sca_check_safety_uv(){
   info "[sca_check_safety_uv|in] (${1:0:7})"
-  _pwd=`pwd`
+  local _pwd=$(pwd)
 
-  [ -z $1 ] && err "[sca_check_safety_uv] missing argument SAFETY_KEY" && exit 1
+  [ -z $1 ] && err "[sca_check_safety_uv] missing argument SAFETY_KEY" && return 1
   local SAFETY_KEY="$1"
 
   local result=0
@@ -2216,7 +2243,7 @@ sca_check_safety_uv(){
   cd "$_pwd"
 
   local msg="[sca_check_safety_uv|out] => ${result}"
-  [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
   info "$msg"
 }
 
@@ -2229,9 +2256,9 @@ sca_check_safety_uv(){
 
 sast_check_bandit(){
   info "[sast_check_bandit|in] ($1)"
-  _pwd=`pwd`
+  local _pwd=$(pwd)
 
-  [ -z $1 ] && err "[sast_check_bandit] missing argument SRC_DIR" && exit 1
+  [ -z $1 ] && err "[sast_check_bandit] missing argument SRC_DIR" && return 1
   local SRC_DIR="$1"
 
   cd "$this_folder"
@@ -2243,7 +2270,7 @@ sast_check_bandit(){
   cd "$_pwd"
 
   local msg="[sast_check_bandit|out] => ${result}"
-  [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
   info "$msg"
 }
 
@@ -2255,9 +2282,9 @@ sast_check_bandit(){
 ############################
 sast_check_bandit_uv(){
   info "[sast_check_bandit_uv|in] ($1)"
-  _pwd=`pwd`
+  local _pwd=$(pwd)
 
-  [ -z $1 ] && err "[sast_check_bandit_uv] missing argument SRC_DIR" && exit 1
+  [ -z $1 ] && err "[sast_check_bandit_uv] missing argument SRC_DIR" && return 1
   local SRC_DIR="$1"
 
   cd "$this_folder"
@@ -2269,7 +2296,7 @@ sast_check_bandit_uv(){
   cd "$_pwd"
 
   local msg="[sast_check_bandit_uv|out] => ${result}"
-  [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
   info "$msg"
 }
 
@@ -2283,12 +2310,12 @@ sast_check_bandit_uv(){
 poetry_publish_pip(){
   info "[poetry_publish_pip|in] ($1, ${2:0:7})"
 
-  [ -z $1 ] && err "[poetry_publish_pip] missing argument PYPI_USER" && exit 1
+  [ -z $1 ] && err "[poetry_publish_pip] missing argument PYPI_USER" && return 1
   local PYPI_USER="$1"
-  [ -z $2 ] && err "[poetry_publish_pip] missing argument PYPI_TOKEN" && exit 1
+  [ -z $2 ] && err "[poetry_publish_pip] missing argument PYPI_TOKEN" && return 1
   local PYPI_TOKEN="$2"
   
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
 
   poetry publish -u "$PYPI_USER" -p "$PYPI_TOKEN"
@@ -2297,7 +2324,7 @@ poetry_publish_pip(){
 
   cd "$_pwd"
   local msg="[poetry_publish_pip|out] => ${result}"
-  [[ ! "$result" -eq "0" ]] && info "$msg" && exit 1
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
   info "$msg"
 }
 
@@ -2310,19 +2337,19 @@ poetry_publish_pip(){
 pyproj_report_header(){
   info "[pyproj_report_header|in] ($1)"
 
-  [[ -z "$1" ]] && err "[pyproj_report_header] must provide DOCNAME" && exit 1
+  [[ -z "$1" ]] && err "[pyproj_report_header] must provide DOCNAME" && return 1
   local DOCNAME="$1"
 
-  [[ -z "$2" ]] && err "[pyproj_report_header] must provide REPO" && exit 1
+  [[ -z "$2" ]] && err "[pyproj_report_header] must provide REPO" && return 1
   local REPO="$2"
 
-  [[ -z "$3" ]] && err "[pyproj_report_header] must provide BRANCH" && exit 1
+  [[ -z "$3" ]] && err "[pyproj_report_header] must provide BRANCH" && return 1
   local BRANCH="$3"
 
-  [[ -z "$4" ]] && err "[pyproj_report_header] must provide COMMIT" && exit 1
+  [[ -z "$4" ]] && err "[pyproj_report_header] must provide COMMIT" && return 1
   local COMMIT="$4"
 
-  _pwd=`pwd`
+  local _pwd=$(pwd)
   cd "$this_folder"
 
   local version=$(uv run python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(d['project']['version'])")
@@ -2352,7 +2379,7 @@ generate_pr_approvals_pdf() {
   local output_file="$3"
 
   if [ -z "$repo" ] || [ -z "$branch" ] || [ -z "$output_file" ]; then
-    err "[generate_pr_approvals_pdf] missing required arguments: repo, branch, output_file" && exit 1
+    err "[generate_pr_approvals_pdf] missing required arguments: repo, branch, output_file" && return 1
   fi
 
   uv run python -c "from tgedr_pycommons.cicd.pr_approvals_github import generate_pr_approvals_pdf; generate_pr_approvals_pdf('$repo', '$branch', '$output_file')"
@@ -2369,7 +2396,7 @@ generate_quality_report_pdf() {
   local output_pdf="$2"
 
   if [ -z "$input_md" ] || [ -z "$output_pdf" ]; then
-    err "[generate_quality_report_pdf] missing required arguments: input_md, output_pdf" && exit 1
+    err "[generate_quality_report_pdf] missing required arguments: input_md, output_pdf" && return 1
   fi
 
   uv run python -c "from tgedr_pycommons.cicd.create_release_report import generate_report; generate_report('$input_md', '$output_pdf')"
@@ -2398,7 +2425,9 @@ terraform_autodeploy(){
   cd "$folder"
 
   terraform init
+  if [ ! "$?" -eq "0" ]; then err "[terraform_autodeploy] could not init" && cd "$_pwd" && return 1; fi
   terraform plan
+  if [ ! "$?" -eq "0" ]; then err "[terraform_autodeploy] could not plan" && cd "$_pwd" && return 1; fi
   terraform apply -auto-approve -lock=true -lock-timeout=10m
   if [ ! "$?" -eq "0" ]; then err "[terraform_autodeploy] could not apply" && cd "$_pwd" && return 1; fi
   cd "$_pwd"

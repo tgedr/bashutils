@@ -12,7 +12,7 @@
 aws_find_kms_alias(){
   echo "[aws_find_kms_alias|in] ($1)"
 
-  [ -z $1 ] && err "[aws_find_kms_alias] missing argument ALIAS" && exit 1
+  [ -z $1 ] && err "[aws_find_kms_alias] missing argument ALIAS" && return 1
   local ALIAS="$1"
   result=1
 
@@ -36,7 +36,7 @@ aws_find_kms_alias(){
 aws_get_cloudfront_cidr(){
   info "[aws_get_cloudfront_cidr|in] ($1)"
 
-  [ -z $1 ] && err "[aws_get_cloudfront_cidr] missing argument OUTPUT_FILE" && exit 1
+  [ -z $1 ] && err "[aws_get_cloudfront_cidr] missing argument OUTPUT_FILE" && return 1
   local OUTPUT_FILE="$1"
 
   local prefix_list_id=$(aws ec2 describe-managed-prefix-lists | jq -r ".\"PrefixLists\" | .[] | select(.PrefixListName == \"com.amazonaws.global.cloudfront.origin-facing\") | .PrefixListId")
@@ -44,7 +44,7 @@ aws_get_cloudfront_cidr(){
   echo $outputs | jq -r ".\"Entries\"" > "$OUTPUT_FILE"
 
   result="$?"
-  [ "$result" -ne "0" ] && err "[aws_get_cloudfront_cidr|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[aws_get_cloudfront_cidr|out]  => ${result}" && return 1
   info "[aws_get_cloudfront_cidr|out] => ${result}"
 }
 
@@ -83,6 +83,6 @@ aws_set_profile(){
 
   result="$?"
   cd "$_pwd"
-  [ "$result" -ne "0" ] && err "[aws_set_profile|out]  => ${result}" && exit 1
+  [ "$result" -ne "0" ] && err "[aws_set_profile|out]  => ${result}" && return 1
   info "[aws_set_profile|out] => ${result}"
 }
