@@ -29,6 +29,7 @@ jobs:
         run: ./helper.sh create_github_release
         env: 
           RELEASE_DRAFT: "true"
+          GH_TOKEN: ${{ github.token }}
       - name: 'commit and push updated version file'
         run: |
           git config user.name "github-actions[bot]"
@@ -36,5 +37,4 @@ jobs:
           git add .version
           git diff --cached --quiet || git commit -m "auto: update .version [skip ci]"
           git push
-        env:
-          GH_TOKEN: ${{ github.token }}
+
