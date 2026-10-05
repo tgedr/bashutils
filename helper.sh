@@ -279,6 +279,7 @@ create_release_artifacts(){
   version="$value"
 
   cp "$version_file" "$dist_dir/" || { err "[create_release_artifacts] failed to move $version_file to $dist_dir"; exit 1; }
+  ls -altr "$dist_dir"
   info "[create_release_artifacts|out] => 0"
 }
 
