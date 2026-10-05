@@ -100,7 +100,7 @@ define_release_to_update(){
 update_bashutils(){
   info "[update_bashutils|in] ($1)"
 
-  [ -z "$BASHUTILS_AUTO_UPDATE" ] || [ "$BASHUTILS_AUTO_UPDATE" -ne "1" ] && err "[update_bashutils] auto update is disabled" && return 1
+  [ -z "$BASHUTILS_AUTO_UPDATE" ] || [ "$BASHUTILS_AUTO_UPDATE" -ne "1" ] && warn "[update_bashutils] auto update is disabled" && return 1
 
   local _pwd=$(pwd)
   local release
