@@ -48,7 +48,7 @@ export FILE_VARIABLES=${FILE_VARIABLES:-".variables"}
 export FILE_LOCAL_VARIABLES=${FILE_LOCAL_VARIABLES:-".local_variables"}
 export FILE_SECRETS=${FILE_SECRETS:-".secrets"}
 export INCLUDE_FILE=${INCLUDE_FILE:-"bashutils"}
-export REPO="tgedr/bashutils"
+export BASHUTILS_REPO="tgedr/bashutils"
 
 find_local_release(){
   local local_file="$this_folder/$INCLUDE_FILE"
@@ -78,7 +78,7 @@ define_release_to_update(){
   local latest_release
   local_release=$(find_local_release)
   [ "$?" -ne "0" ] && err "[update_bashutils] failed to find local release" && return 1
-  latest_release=$(find_latest_release "$REPO")
+  latest_release=$(find_latest_release "$BASHUTILS_REPO")
   [ "$?" -ne "0" ] && err "[update_bashutils] failed to find latest release" && return 1
   local result
   if (( local_release < latest_release )); then
@@ -114,7 +114,7 @@ update_bashutils(){
   # Use assets API with Accept: application/octet-stream to avoid redirect to
   # objects.githubusercontent.com (which may be blocked by proxies like Zscaler)
   local release_json
-  release_json=$(eval curl -fsSL "\"https://api.github.com/repos/$REPO/releases/tags/$release\"")
+  release_json=$(eval curl -fsSL "\"https://api.github.com/repos/$BASHUTILS_REPO/releases/tags/$release\"")
   result="$?"
   if [ "$result" -ne "0" ]; then
     err "[update_bashutils] failed to fetch release metadata"
@@ -133,7 +133,7 @@ update_bashutils(){
     info "[get_updated_release] downloading asset: $asset_name (id: $asset_id)"
     eval curl -fsSL -H "\"Accept: application/octet-stream\"" \
       -o "\"$asset_name\"" \
-      "\"https://api.github.com/repos/$REPO/releases/assets/$asset_id\""
+      "\"https://api.github.com/repos/$BASHUTILS_REPO/releases/assets/$asset_id\""
     if [ "$?" -ne "0" ]; then
       err "[get_updated_release] failed to download asset: $asset_name"
       cd "$_pwd"

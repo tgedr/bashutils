@@ -188,14 +188,14 @@ find_latest_release(){
 #   purpose: compares the local integer version with the latest release and prompts before selecting an update
 #   parameters: none
 #   returns: 0 and prints the selected release, -1 if the user cancels, -2 if up-to-date; nonzero on lookup failure
-#   requires: REPO, find_local_release, find_latest_release, interactive stdin
+#   requires: BASHUTILS_REPO, find_local_release, find_latest_release, interactive stdin
 ############################
 define_release_to_update(){
   local local_release
   local latest_release
   local_release=$(find_local_release)
   [ "$?" -ne "0" ] && err "[update_bashutils] failed to find local release" && return 1
-  latest_release=$(find_latest_release "$REPO")
+  latest_release=$(find_latest_release "$BASHUTILS_REPO")
   [ "$?" -ne "0" ] && err "[update_bashutils] failed to find latest release" && return 1
   local result
   if (( local_release < latest_release )); then
@@ -219,7 +219,7 @@ define_release_to_update(){
 #   purpose: prompts to update the local bashutils file from the latest release and downloads its release assets
 #   parameters: none
 #   returns: 0 if updated, cancelled, or already current; 1 if updates are disabled or an operation fails
-#   requires: BASHUTILS_AUTO_UPDATE, REPO, this_folder, define_release_to_update, curl, python3
+#   requires: BASHUTILS_AUTO_UPDATE, BASHUTILS_REPO, this_folder, define_release_to_update, curl, python3
 #   side-effects: downloads release assets into this_folder
 ############################
 update_bashutils(){
@@ -239,7 +239,7 @@ update_bashutils(){
   # Use assets API with Accept: application/octet-stream to avoid redirect to
   # objects.githubusercontent.com (which may be blocked by proxies like Zscaler)
   local release_json
-  release_json=$(eval curl -fsSL "\"https://api.github.com/repos/$REPO/releases/tags/$release\"")
+  release_json=$(eval curl -fsSL "\"https://api.github.com/repos/$BASHUTILS_REPO/releases/tags/$release\"")
   result="$?"
   if [ "$result" -ne "0" ]; then
     err "[update_bashutils] failed to fetch release metadata"
@@ -258,7 +258,7 @@ update_bashutils(){
     info "[get_updated_release] downloading asset: $asset_name (id: $asset_id)"
     eval curl -fsSL -H "\"Accept: application/octet-stream\"" \
       -o "\"$asset_name\"" \
-      "\"https://api.github.com/repos/$REPO/releases/assets/$asset_id\""
+      "\"https://api.github.com/repos/$BASHUTILS_REPO/releases/assets/$asset_id\""
     if [ "$?" -ne "0" ]; then
       err "[get_updated_release] failed to download asset: $asset_name"
       cd "$_pwd"
