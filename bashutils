@@ -1,4 +1,4 @@
-# BASHUTILS VERSION: 5
+# BASHUTILS VERSION: 6
 ##########################################
 #######  ------- assorted -------  #######
 ##########################################
@@ -271,6 +271,30 @@ update_bashutils(){
 
   [ "$result" -ne "0" ] && err "[get_updated_release|out] => ${result}" && return 1
   info "[get_updated_release|out] => ${result}"
+}
+
+############################
+# update_readme_with_ai_model
+#   updates the README file using an AI model
+#   returns: 0 if successful, 1 if an error occurs
+#   requires: this_folder, pi, openrouter provider
+#   side-effects: modifies the README file
+############################
+update_readme_with_ai_model(){
+  info "[update_readme_with_ai_model|in]"
+  _pwd=$(pwd)
+  cd "$this_folder"
+
+  local result
+  local user_prompt="Update the README file with the latest information of this repository, do output the changes"
+  pi -c --thinking medium --provider openrouter --model openrouter/auto --approve @README.md -p "$user_prompt"
+  result="$?"
+  if [ ! "$result" -eq "0" ] ; then err "[update_readme_with_ai_model] could not update README"; fi
+
+  cd "$_pwd"
+  local msg="[update_readme_with_ai_model|out] => ${result}"
+  [[ ! "$result" -eq "0" ]] && info "$msg" && return 1
+  info "$msg"
 }
 ##########################################
 #######     ------- aws -------    #######
